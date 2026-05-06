@@ -1,0 +1,127 @@
+description: "Aggregation - $lookup"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: orders
+    arguments:
+      documents:
+        - { _id: 1, item: "almonds", price: 12, qty: 2 }
+        - { _id: 2, item: "pecans",  price: 20, qty: 1 }
+        - { _id: 3, item: "sugar",   price: 5,  qty: 4 }
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: inventory
+    arguments:
+      documents:
+        - { _id: 1, sku: "almonds", description: "product 1", instock: 120 }
+        - { _id: 2, sku: "cashews", description: "product 2", instock: 60  }
+        - { _id: 3, sku: "pecans",  description: "product 3", instock: 80  }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: orders
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: inventory
+
+tests:
+  - description: "$lookup joins orders with inventory"
+    operations:
+      - name: aggregate
+        object: collection
+        database: harness_test
+        collection: orders
+        arguments:
+          pipeline:
+            - $sort: { _id: 1 }
+            - $lookup:
+                from: inventory
+                localField: item
+                foreignField: sku
+                as: inventory_docs
+            - $project:
+                _id: 1
+                item: 1
+                inventory_docs: 1
+        expectResult:
+          - _id: 1
+            item: "almonds"
+            inventory_docs:
+              - sku: "almonds"
+                instock: 120
+          - _id: 2
+            item: "pecans"
+            inventory_docs:
+              - sku: "pecans"
+                instock: 80
+          - _id: 3
+            item: "sugar"
+            inventory_docs: []
+
+  - description: "$lookup with no match produces empty array"
+    operations:
+      - name: aggregate
+        object: collection
+        database: harness_test
+        collection: orders
+        arguments:
+          pipeline:
+            - $match: { _id: 3 }
+            - $lookup:
+                from: inventory
+                localField: item
+                foreignField: sku
+                as: inventory_docs
+        expectResult:
+          - _id: 3
+            item: "sugar"
+            inventory_docs: []
+
+  - description: "$lookup then $unwind flattens joined documents"
+    operations:
+      - name: aggregate
+        object: collection
+        database: harness_test
+        collection: orders
+        arguments:
+          pipeline:
+            - $match: { _id: 1 }
+            - $lookup:
+                from: inventory
+                localField: item
+                foreignField: sku
+                as: inv
+            - $unwind: "$inv"
+            - $project:
+                _id: 1
+                item: 1
+                instock: "$inv.instock"
+        expectResult:
+          - _id: 1
+            item: "almonds"
+            instock: 120
+
+  - description: "$group with $sum aggregates across collection"
+    operations:
+      - name: aggregate
+        object: collection
+        database: harness_test
+        collection: orders
+        arguments:
+          pipeline:
+            - $group:
+                _id: null
+                totalRevenue:
+                  $sum: { $multiply: ["$price", "$qty"] }
+        expectResult:
+          - _id: null
+            totalRevenue: 64

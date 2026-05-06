@@ -1,0 +1,148 @@
+description: "CRUD - Array Update Operators"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: array_test
+    arguments:
+      documents:
+        - { _id: 1, tags: ["a", "b", "c"], nums: [3, 1, 4, 1, 5] }
+        - { _id: 2, tags: ["b", "c"],      nums: [2, 7, 1, 8, 2] }
+        - { _id: 3, tags: ["a"],           nums: [1] }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: array_test
+
+tests:
+  - description: "$pull removes matching element"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 1 }
+          update: { $pull: { tags: "b" } }
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 1 }
+        expectResult:
+          tags: ["a", "c"]
+
+  - description: "$pull with condition removes matching numbers"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 1 }
+          update: { $pull: { nums: { $lt: 3 } } }
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 1 }
+        expectResult:
+          nums: [3, 4, 5]
+
+  - description: "$addToSet adds element only if absent"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 3 }
+          update: { $addToSet: { tags: "b" } }
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 3 }
+        expectResult:
+          tags: ["a", "b"]
+
+  - description: "$addToSet is idempotent for existing element"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 3 }
+          update: { $addToSet: { tags: "a" } }
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 3 }
+        expectResult:
+          tags: ["a"]
+
+  - description: "$pop removes last element"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 2 }
+          update: { $pop: { tags: 1 } }
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 2 }
+        expectResult:
+          tags: ["b"]
+
+  - description: "$pop removes first element"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 2 }
+          update: { $pop: { tags: -1 } }
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 2 }
+        expectResult:
+          tags: ["c"]
+
+  - description: "$push with $each appends multiple elements"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 3 }
+          update: { $push: { nums: { $each: [2, 3] } } }
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: array_test
+        arguments:
+          filter: { _id: 3 }
+        expectResult:
+          nums: [1, 2, 3]

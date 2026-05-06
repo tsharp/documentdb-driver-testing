@@ -1,0 +1,164 @@
+description: "CRUD - Find And Modify / Upsert"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: fam_test
+    arguments:
+      documents:
+        - { _id: 1, name: "Alice", score: 10 }
+        - { _id: 2, name: "Bob",   score: 20 }
+        - { _id: 3, name: "Carol", score: 30 }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: fam_test
+
+tests:
+  - description: "findOneAndUpdate returns old document by default"
+    operations:
+      - name: findOneAndUpdate
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 1 }
+          update: { $set: { score: 99 } }
+        expectResult:
+          _id: 1
+          name: "Alice"
+          score: 10
+
+  - description: "findOneAndUpdate with returnDocument after returns new document"
+    operations:
+      - name: findOneAndUpdate
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 2 }
+          update: { $set: { score: 99 } }
+          returnDocument: "after"
+        expectResult:
+          _id: 2
+          name: "Bob"
+          score: 99
+
+  - description: "findOneAndUpdate with upsert inserts new document"
+    operations:
+      - name: findOneAndUpdate
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 99 }
+          update: { $set: { name: "New", score: 0 } }
+          upsert: true
+          returnDocument: "after"
+        expectResult:
+          _id: 99
+          name: "New"
+          score: 0
+
+  - description: "findOneAndUpdate no match without upsert returns null"
+    operations:
+      - name: findOneAndUpdate
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 999 }
+          update: { $set: { score: 0 } }
+        expectResult: null
+
+  - description: "findOneAndDelete returns the deleted document"
+    operations:
+      - name: findOneAndDelete
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 3 }
+        expectResult:
+          _id: 3
+          name: "Carol"
+          score: 30
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 3 }
+        expectResult: 0
+
+  - description: "findOneAndDelete no match returns null"
+    operations:
+      - name: findOneAndDelete
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 999 }
+        expectResult: null
+
+  - description: "findOneAndReplace returns old document by default"
+    operations:
+      - name: findOneAndReplace
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 1 }
+          replacement: { _id: 1, name: "Alicia", score: 100 }
+        expectResult:
+          _id: 1
+          name: "Alice"
+
+  - description: "findOneAndReplace with returnDocument after returns new document"
+    operations:
+      - name: findOneAndReplace
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 2 }
+          replacement: { _id: 2, name: "Robert", score: 200 }
+          returnDocument: "after"
+        expectResult:
+          _id: 2
+          name: "Robert"
+          score: 200
+
+  - description: "updateOne with upsert inserts on no match"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 50 }
+          update: { $set: { name: "Upserted", score: 0 } }
+          upsert: true
+        expectResult:
+          matchedCount: 0
+          upsertedId: 50
+
+  - description: "replaceOne with upsert inserts on no match"
+    operations:
+      - name: replaceOne
+        object: collection
+        database: harness_test
+        collection: fam_test
+        arguments:
+          filter: { _id: 51 }
+          replacement: { _id: 51, name: "Inserted", score: 1 }
+          upsert: true
+        expectResult:
+          matchedCount: 0
+          upsertedId: 51

@@ -1,0 +1,93 @@
+description: "Index Management"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: index_test
+    arguments:
+      documents:
+        - { _id: 1, email: "alice@example.com", first: "Alice", last: "Smith",  score: 90 }
+        - { _id: 2, email: "bob@example.com",   first: "Bob",   last: "Jones",  score: 75 }
+        - { _id: 3, email: "carol@example.com", first: "Carol", last: "Taylor", score: 85 }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: index_test
+
+tests:
+  - description: "createIndex on single field returns index name"
+    operations:
+      - name: createIndex
+        object: collection
+        database: harness_test
+        collection: index_test
+        arguments:
+          keys: { score: 1 }
+          options:
+            name: score_1
+        expectResult:
+          $$type: string
+
+  - description: "createIndex with unique enforces uniqueness"
+    operations:
+      - name: createIndex
+        object: collection
+        database: harness_test
+        collection: index_test
+        arguments:
+          keys: { email: 1 }
+          options:
+            name: email_unique
+            unique: true
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: index_test
+        arguments:
+          document: { _id: 99, email: "alice@example.com" }
+        expectError:
+          isError: true
+
+  - description: "createIndex compound index"
+    operations:
+      - name: createIndex
+        object: collection
+        database: harness_test
+        collection: index_test
+        arguments:
+          keys: { last: 1, first: 1 }
+          options:
+            name: name_compound
+        expectResult:
+          $$type: string
+
+  - description: "listIndexes succeeds and returns at least the _id index"
+    operations:
+      - name: listIndexes
+        object: collection
+        database: harness_test
+        collection: index_test
+        arguments: {}
+
+  - description: "dropIndex by name removes the index"
+    operations:
+      - name: createIndex
+        object: collection
+        database: harness_test
+        collection: index_test
+        arguments:
+          keys: { score: -1 }
+          options:
+            name: temp_score_idx
+      - name: dropIndex
+        object: collection
+        database: harness_test
+        collection: index_test
+        arguments:
+          name: temp_score_idx

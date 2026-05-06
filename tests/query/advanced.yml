@@ -1,0 +1,118 @@
+description: "Query - Advanced Operators"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: adv_query_test
+    arguments:
+      documents:
+        - { _id: 1, x: 10, y: 2, tags: ["a", "b", "c"] }
+        - { _id: 2, x: 20, y: 5, tags: ["b", "c"] }
+        - { _id: 3, x: 15, y: 2, tags: ["a", "c"] }
+        - { _id: 4, x: 40, y: 1, tags: ["a", "b"] }
+        - { _id: 5, x: 50, y: 4, tags: ["c"] }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: adv_query_test
+
+tests:
+  - description: "$nor excludes documents matching any condition"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            $nor:
+              - x: { $gt: 30 }
+              - y: { $gt: 3 }
+        expectResult: 2
+
+  - description: "$mod matches numbers by modulo"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            x: { $mod: [10, 0] }
+        expectResult: 4
+
+  - description: "$all matches arrays containing all specified elements"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            tags: { $all: ["a", "b"] }
+        expectResult: 2
+
+  - description: "nested $and/$or with mixed conditions"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            $and:
+              - $or:
+                  - x: 10
+                  - x: 20
+              - y: { $lte: 5 }
+        expectResult: 2
+
+  - description: "$exists true finds documents with the field"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            tags: { $exists: true }
+        expectResult: 5
+
+  - description: "$size matches arrays of exact length"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            tags: { $size: 2 }
+        expectResult: 3
+
+  - description: "$in matches any value in list"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            x: { $in: [10, 15, 20] }
+        expectResult: 3
+
+  - description: "$nin excludes documents matching any listed value"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: adv_query_test
+        arguments:
+          filter:
+            x: { $nin: [40, 50] }
+        expectResult: 3

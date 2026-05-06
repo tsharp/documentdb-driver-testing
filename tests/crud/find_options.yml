@@ -1,0 +1,115 @@
+description: "CRUD - Find Cursor Options"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: find_opts_test
+    arguments:
+      documents:
+        - { _id: 1, name: "Alice", score: 50, active: true }
+        - { _id: 2, name: "Bob",   score: 30, active: false }
+        - { _id: 3, name: "Carol", score: 80, active: true }
+        - { _id: 4, name: "Dave",  score: 10, active: false }
+        - { _id: 5, name: "Eve",   score: 60, active: true }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: find_opts_test
+
+tests:
+  - description: "sort ascending by field"
+    operations:
+      - name: find
+        object: collection
+        database: harness_test
+        collection: find_opts_test
+        arguments:
+          filter: {}
+          sort: { score: 1 }
+          projection: { _id: 1, score: 1 }
+        expectResult:
+          - { _id: 4, score: 10 }
+          - { _id: 2, score: 30 }
+          - { _id: 1, score: 50 }
+          - { _id: 5, score: 60 }
+          - { _id: 3, score: 80 }
+
+  - description: "sort descending with limit"
+    operations:
+      - name: find
+        object: collection
+        database: harness_test
+        collection: find_opts_test
+        arguments:
+          filter: {}
+          sort: { score: -1 }
+          limit: 3
+          projection: { _id: 1, score: 1 }
+        expectResult:
+          - { _id: 3, score: 80 }
+          - { _id: 5, score: 60 }
+          - { _id: 1, score: 50 }
+
+  - description: "skip and limit for pagination"
+    operations:
+      - name: find
+        object: collection
+        database: harness_test
+        collection: find_opts_test
+        arguments:
+          filter: {}
+          sort: { _id: 1 }
+          skip: 2
+          limit: 2
+          projection: { _id: 1 }
+        expectResult:
+          - { _id: 3 }
+          - { _id: 4 }
+
+  - description: "projection includes specific fields"
+    operations:
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: find_opts_test
+        arguments:
+          filter: { _id: 1 }
+          projection: { name: 1, score: 1 }
+        expectResult:
+          _id: 1
+          name: "Alice"
+          score: 50
+
+  - description: "projection excludes specific fields"
+    operations:
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: find_opts_test
+        arguments:
+          filter: { _id: 1 }
+          projection: { score: 0, active: 0 }
+        expectResult:
+          _id: 1
+          name: "Alice"
+
+  - description: "find with filter and sort"
+    operations:
+      - name: find
+        object: collection
+        database: harness_test
+        collection: find_opts_test
+        arguments:
+          filter: { active: true }
+          sort: { score: -1 }
+          projection: { _id: 1, score: 1 }
+        expectResult:
+          - { _id: 3, score: 80 }
+          - { _id: 5, score: 60 }
+          - { _id: 1, score: 50 }

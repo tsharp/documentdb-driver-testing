@@ -1,0 +1,119 @@
+description: "CRUD - Bulk Write"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: bulk_test
+    arguments:
+      documents:
+        - { _id: 1, x: 1 }
+        - { _id: 2, x: 2 }
+        - { _id: 3, x: 3 }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: bulk_test
+
+tests:
+  - description: "bulkWrite with mixed insert, update, delete operations"
+    operations:
+      - name: bulkWrite
+        object: collection
+        database: harness_test
+        collection: bulk_test
+        arguments:
+          requests:
+            - insertOne:
+                document: { _id: 10, x: 10 }
+            - updateOne:
+                filter: { _id: 1 }
+                update: { $set: { x: 100 } }
+            - deleteOne:
+                filter: { _id: 2 }
+        expectResult:
+          insertedCount: 1
+          modifiedCount: 1
+          deletedCount: 1
+
+  - description: "bulkWrite insertMany equivalent"
+    operations:
+      - name: bulkWrite
+        object: collection
+        database: harness_test
+        collection: bulk_test
+        arguments:
+          requests:
+            - insertOne:
+                document: { _id: 20, x: 20 }
+            - insertOne:
+                document: { _id: 21, x: 21 }
+        expectResult:
+          insertedCount: 2
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: bulk_test
+        arguments:
+          filter: { _id: { $in: [20, 21] } }
+        expectResult: 2
+
+  - description: "bulkWrite ordered stops on first error"
+    operations:
+      - name: bulkWrite
+        object: collection
+        database: harness_test
+        collection: bulk_test
+        arguments:
+          ordered: true
+          requests:
+            - insertOne:
+                document: { _id: 1 }
+            - insertOne:
+                document: { _id: 99 }
+        expectError:
+          isError: true
+
+  - description: "bulkWrite unordered continues past errors"
+    operations:
+      - name: bulkWrite
+        object: collection
+        database: harness_test
+        collection: bulk_test
+        arguments:
+          ordered: false
+          requests:
+            - insertOne:
+                document: { _id: 1 }
+            - insertOne:
+                document: { _id: 30, x: 30 }
+        expectError:
+          isError: true
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: bulk_test
+        arguments:
+          filter: { _id: 30 }
+        expectResult:
+          _id: 30
+          x: 30
+
+  - description: "bulkWrite updateMany variant"
+    operations:
+      - name: bulkWrite
+        object: collection
+        database: harness_test
+        collection: bulk_test
+        arguments:
+          requests:
+            - updateMany:
+                filter: { x: { $lte: 3 } }
+                update: { $set: { updated: true } }
+        expectResult:
+          modifiedCount: 3

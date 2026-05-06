@@ -1,0 +1,78 @@
+description: "CRUD - Distinct"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: distinct_test
+    arguments:
+      documents:
+        - { _id: 1, category: "A", tags: ["x", "y"], nested: { val: 1 } }
+        - { _id: 2, category: "B", tags: ["y", "z"], nested: { val: 2 } }
+        - { _id: 3, category: "A", tags: ["x", "z"], nested: { val: 1 } }
+        - { _id: 4, category: "C", tags: ["x"],      nested: { val: 3 } }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: distinct_test
+
+tests:
+  - description: "distinct returns unique scalar values"
+    operations:
+      - name: distinct
+        object: collection
+        database: harness_test
+        collection: distinct_test
+        arguments:
+          field: category
+          filter: {}
+        expectResult:
+          - "A"
+          - "B"
+          - "C"
+
+  - description: "distinct with filter reduces results"
+    operations:
+      - name: distinct
+        object: collection
+        database: harness_test
+        collection: distinct_test
+        arguments:
+          field: category
+          filter: { _id: { $lte: 2 } }
+        expectResult:
+          - "A"
+          - "B"
+
+  - description: "distinct on array field flattens elements"
+    operations:
+      - name: distinct
+        object: collection
+        database: harness_test
+        collection: distinct_test
+        arguments:
+          field: tags
+          filter: {}
+        expectResult:
+          - "x"
+          - "y"
+          - "z"
+
+  - description: "distinct on nested field with dot notation"
+    operations:
+      - name: distinct
+        object: collection
+        database: harness_test
+        collection: distinct_test
+        arguments:
+          field: nested.val
+          filter: {}
+        expectResult:
+          - 1
+          - 2
+          - 3

@@ -32,8 +32,11 @@ use std::sync::Arc;
 
 use bson::{doc, Document};
 use mongodb::{
-    Client, ClientSession, Collection,
-    options::ClientOptions,
+    Client, ClientSession, Collection, IndexModel,
+    options::{
+        ClientOptions, FindOptions, FindOneAndUpdateOptions, FindOneAndDeleteOptions,
+        FindOneAndReplaceOptions, ReturnDocument, UpdateOptions, ReplaceOptions, IndexOptions,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -113,8 +116,38 @@ impl ShimState {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Convert a `serde_json::Value` to a BSON `Document`.
+/// Integers that fit in i32 are encoded as Int32 (BSON type 16), matching
+/// the behaviour of the Node.js BSON library and enabling `$type: "int"`.
+fn json_to_bson(v: &Value) -> bson::Bson {
+    match v {
+        Value::Null        => bson::Bson::Null,
+        Value::Bool(b)     => bson::Bson::Boolean(*b),
+        Value::String(s)   => bson::Bson::String(s.clone()),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                if i >= i32::MIN as i64 && i <= i32::MAX as i64 {
+                    bson::Bson::Int32(i as i32)
+                } else {
+                    bson::Bson::Int64(i)
+                }
+            } else {
+                bson::Bson::Double(n.as_f64().unwrap_or(0.0))
+            }
+        }
+        Value::Array(arr)  => bson::Bson::Array(arr.iter().map(json_to_bson).collect()),
+        Value::Object(obj) => {
+            let mut doc = Document::new();
+            for (k, v) in obj { doc.insert(k.clone(), json_to_bson(v)); }
+            bson::Bson::Document(doc)
+        }
+    }
+}
+
 fn value_to_doc(v: &Value) -> Result<Document, String> {
-    bson::to_document(&v).map_err(|e| format!("BSON conversion failed: {e}"))
+    match json_to_bson(v) {
+        bson::Bson::Document(d) => Ok(d),
+        other => Err(format!("Expected document, got {:?}", other)),
+    }
 }
 
 /// Convert any BSON-serialisable value back to a `serde_json::Value`.
@@ -248,14 +281,19 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
         }
 
-        // ── find ───────────────────────────────────────────────────────────
+        // ── find (with options) ─────────────────────────────────────────────
         "find" => {
             let coll = collection(state.client()?, &op.database, &op.collection)?;
             let filter = value_to_doc(args.get("filter").unwrap_or(&Value::Object(Default::default())))?;
+            let mut opts = FindOptions::default();
+            if let Some(sort) = args.get("sort") { opts.sort = Some(value_to_doc(sort)?); }
+            if let Some(proj) = args.get("projection") { opts.projection = Some(value_to_doc(proj)?); }
+            if let Some(skip) = args.get("skip").and_then(|v| v.as_i64()) { opts.skip = Some(skip as u64); }
+            if let Some(limit) = args.get("limit").and_then(|v| v.as_i64()) { opts.limit = Some(limit); }
             use futures_util::TryStreamExt;
             let docs: Vec<Document> = if let Some(ref key) = session_key {
                 let session = state.require_session(key)?;
-                coll.find_with_session(filter, None, session)
+                coll.find_with_session(filter, opts, session)
                     .await
                     .map_err(|e| e.to_string())?
                     .stream(session)
@@ -263,7 +301,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                     .await
                     .map_err(|e: mongodb::error::Error| e.to_string())?
             } else {
-                coll.find(filter, None)
+                coll.find(filter, opts)
                     .await
                     .map_err(|e| e.to_string())?
                     .try_collect()
@@ -278,17 +316,23 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let coll = collection(state.client()?, &op.database, &op.collection)?;
             let filter = value_to_doc(args.get("filter").unwrap_or(&Value::Null))?;
             let update = value_to_doc(args.get("update").unwrap_or(&Value::Null))?;
+            let upsert = args.get("upsert").and_then(|v| v.as_bool()).unwrap_or(false);
+            let opts = if upsert { Some(UpdateOptions::builder().upsert(true).build()) } else { None };
             let result = if let Some(ref key) = session_key {
                 let session = state.require_session(key)?;
-                coll.update_one_with_session(filter, update, None, session).await
+                coll.update_one_with_session(filter, update, opts, session).await
             } else {
-                coll.update_one(filter, update, None).await
+                coll.update_one(filter, update, opts).await
             }.map_err(|e| e.to_string())?;
-            Ok(serde_json::json!({
+            let mut r = serde_json::json!({
                 "acknowledged": true,
                 "matchedCount":  result.matched_count,
                 "modifiedCount": result.modified_count,
-            }))
+            });
+            if let Some(id) = result.upserted_id {
+                r["upsertedId"] = bson_to_value(&id);
+            }
+            Ok(r)
         }
 
         // ── updateMany ─────────────────────────────────────────────────────
@@ -314,17 +358,23 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let coll = collection(state.client()?, &op.database, &op.collection)?;
             let filter      = value_to_doc(args.get("filter").unwrap_or(&Value::Null))?;
             let replacement = value_to_doc(args.get("replacement").unwrap_or(&Value::Null))?;
+            let upsert = args.get("upsert").and_then(|v| v.as_bool()).unwrap_or(false);
+            let opts = if upsert { Some(ReplaceOptions::builder().upsert(true).build()) } else { None };
             let result = if let Some(ref key) = session_key {
                 let session = state.require_session(key)?;
-                coll.replace_one_with_session(filter, replacement, None, session).await
+                coll.replace_one_with_session(filter, replacement, opts, session).await
             } else {
-                coll.replace_one(filter, replacement, None).await
+                coll.replace_one(filter, replacement, opts).await
             }.map_err(|e| e.to_string())?;
-            Ok(serde_json::json!({
+            let mut r = serde_json::json!({
                 "acknowledged": true,
                 "matchedCount":  result.matched_count,
                 "modifiedCount": result.modified_count,
-            }))
+            });
+            if let Some(id) = result.upserted_id {
+                r["upsertedId"] = bson_to_value(&id);
+            }
+            Ok(r)
         }
 
         // ── deleteOne ──────────────────────────────────────────────────────
@@ -411,6 +461,90 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             Ok(bson_to_value(&docs))
         }
 
+        // ── findOneAndUpdate ───────────────────────────────────────────────
+        "findOneAndUpdate" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            let filter = value_to_doc(args.get("filter").unwrap_or(&Value::Null))?;
+            let update = value_to_doc(args.get("update").unwrap_or(&Value::Null))?;
+            let return_after = args.get("returnDocument").and_then(|v| v.as_str()) == Some("after");
+            let upsert = args.get("upsert").and_then(|v| v.as_bool()).unwrap_or(false);
+            let opts = FindOneAndUpdateOptions::builder()
+                .return_document(if return_after { ReturnDocument::After } else { ReturnDocument::Before })
+                .upsert(upsert)
+                .build();
+            let result = coll.find_one_and_update(filter, update, opts)
+                .await.map_err(|e| e.to_string())?;
+            Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
+        }
+
+        // ── findOneAndDelete ───────────────────────────────────────────────
+        "findOneAndDelete" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            let filter = value_to_doc(args.get("filter").unwrap_or(&Value::Null))?;
+            let opts = FindOneAndDeleteOptions::builder().build();
+            let result = coll.find_one_and_delete(filter, opts)
+                .await.map_err(|e| e.to_string())?;
+            Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
+        }
+
+        // ── findOneAndReplace ──────────────────────────────────────────────
+        "findOneAndReplace" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            let filter      = value_to_doc(args.get("filter").unwrap_or(&Value::Null))?;
+            let replacement = value_to_doc(args.get("replacement").unwrap_or(&Value::Null))?;
+            let return_after = args.get("returnDocument").and_then(|v| v.as_str()) == Some("after");
+            let upsert = args.get("upsert").and_then(|v| v.as_bool()).unwrap_or(false);
+            let opts = FindOneAndReplaceOptions::builder()
+                .return_document(if return_after { ReturnDocument::After } else { ReturnDocument::Before })
+                .upsert(upsert)
+                .build();
+            let result = coll.find_one_and_replace(filter, replacement, opts)
+                .await.map_err(|e| e.to_string())?;
+            Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
+        }
+
+        // ── distinct ───────────────────────────────────────────────────────
+        "distinct" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            let field = args.get("field").and_then(|v| v.as_str()).ok_or("Missing field")?;
+            let filter = args.get("filter").map(value_to_doc).transpose()?;
+            let result = coll.distinct(field, filter, None)
+                .await.map_err(|e| e.to_string())?;
+            Ok(bson_to_value(&result))
+        }
+
+        // ── createIndex ────────────────────────────────────────────────────
+        "createIndex" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            let keys = value_to_doc(args.get("keys").unwrap_or(&Value::Null))?;
+            let index_opts_val = args.get("options");
+            let name: Option<String> = index_opts_val.and_then(|o| o.get("name")).and_then(|v| v.as_str()).map(|s| s.to_string());
+            let unique: Option<bool> = index_opts_val.and_then(|o| o.get("unique")).and_then(|v| v.as_bool());
+            let opts = IndexOptions::builder().name(name).unique(unique).build();
+            let model = IndexModel::builder().keys(keys).options(opts).build();
+            let result = coll.create_index(model, None).await.map_err(|e| e.to_string())?;
+            Ok(Value::String(result.index_name))
+        }
+
+        // ── dropIndex ──────────────────────────────────────────────────────
+        "dropIndex" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            let name = args.get("name").and_then(|v| v.as_str()).ok_or("Missing index name")?;
+            coll.drop_index(name, None).await.map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+
+        // ── listIndexes ────────────────────────────────────────────────────
+        "listIndexes" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            use futures_util::TryStreamExt;
+            let indexes: Vec<_> = coll.list_indexes(None)
+                .await.map_err(|e| e.to_string())?
+                .try_collect()
+                .await.map_err(|e| e.to_string())?;
+            Ok(bson_to_value(&indexes))
+        }
+
         // ── runCommand ─────────────────────────────────────────────────────
         "runCommand" => {
             let db_name = op.database.as_deref().ok_or("Missing database")?;
@@ -469,6 +603,74 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(bson_to_value(&names))
+        }
+
+        // ── bulkWrite ──────────────────────────────────────────────────────
+        "bulkWrite" => {
+            let coll = collection(state.client()?, &op.database, &op.collection)?;
+            let ordered = args.get("ordered").and_then(|v| v.as_bool()).unwrap_or(true);
+            let requests = args.get("requests").and_then(|v| v.as_array())
+                .ok_or_else(|| "Missing requests array".to_string())?
+                .clone();
+            let mut inserted_count: i64 = 0;
+            let mut matched_count: i64 = 0;
+            let mut modified_count: i64 = 0;
+            let mut deleted_count: i64 = 0;
+            let mut first_error: Option<String> = None;
+            for req in &requests {
+                let op_result: Result<(), String> =
+                    if let Some(ins) = req.get("insertOne") {
+                        let doc = value_to_doc(ins.get("document").unwrap_or(&Value::Null))?;
+                        coll.insert_one(doc, None).await
+                            .map(|_| { inserted_count += 1; })
+                            .map_err(|e| e.to_string())
+                    } else if let Some(upd) = req.get("updateOne") {
+                        let filter = value_to_doc(upd.get("filter").unwrap_or(&Value::Null))?;
+                        let update = value_to_doc(upd.get("update").unwrap_or(&Value::Null))?;
+                        coll.update_one(filter, update, None).await
+                            .map(|r| { matched_count += r.matched_count as i64; modified_count += r.modified_count as i64; })
+                            .map_err(|e| e.to_string())
+                    } else if let Some(upd) = req.get("updateMany") {
+                        let filter = value_to_doc(upd.get("filter").unwrap_or(&Value::Null))?;
+                        let update = value_to_doc(upd.get("update").unwrap_or(&Value::Null))?;
+                        coll.update_many(filter, update, None).await
+                            .map(|r| { matched_count += r.matched_count as i64; modified_count += r.modified_count as i64; })
+                            .map_err(|e| e.to_string())
+                    } else if let Some(del) = req.get("deleteOne") {
+                        let filter = value_to_doc(del.get("filter").unwrap_or(&Value::Null))?;
+                        coll.delete_one(filter, None).await
+                            .map(|r| { deleted_count += r.deleted_count as i64; })
+                            .map_err(|e| e.to_string())
+                    } else if let Some(del) = req.get("deleteMany") {
+                        let filter = value_to_doc(del.get("filter").unwrap_or(&Value::Null))?;
+                        coll.delete_many(filter, None).await
+                            .map(|r| { deleted_count += r.deleted_count as i64; })
+                            .map_err(|e| e.to_string())
+                    } else if let Some(rep) = req.get("replaceOne") {
+                        let filter = value_to_doc(rep.get("filter").unwrap_or(&Value::Null))?;
+                        let replacement = value_to_doc(rep.get("replacement").unwrap_or(&Value::Null))?;
+                        coll.replace_one(filter, replacement, None).await
+                            .map(|r| { matched_count += r.matched_count as i64; modified_count += r.modified_count as i64; })
+                            .map_err(|e| e.to_string())
+                    } else {
+                        Err("Unknown write model in bulkWrite".to_string())
+                    };
+                match op_result {
+                    Err(e) if ordered => return Err(e),
+                    Err(e) if first_error.is_none() => { first_error = Some(e); }
+                    _ => {}
+                }
+            }
+            let result = serde_json::json!({
+                "acknowledged": true,
+                "insertedCount": inserted_count,
+                "matchedCount":  matched_count,
+                "modifiedCount": modified_count,
+                "deletedCount":  deleted_count,
+                "upsertedCount": 0,
+            });
+            if let Some(err) = first_error { return Err(err); }
+            Ok(result)
         }
 
         other => Err(format!("Unsupported operation: \"{other}\"")),
