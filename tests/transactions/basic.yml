@@ -12,6 +12,7 @@ teardown:
 
 tests:
   - description: "committed transaction makes writes visible"
+    skipReason: "requires replica set (--replSet disabled on mongodb target)"
     operations:
       - name: startSession
         object: client
@@ -40,6 +41,7 @@ tests:
           committed: true
 
   - description: "aborted transaction rolls back writes"
+    skipReason: "requires replica set (--replSet disabled on mongodb target)"
     operations:
       - name: startSession
         object: client
@@ -66,6 +68,7 @@ tests:
         expectResult: null
 
   - description: "multiple write operations in a single transaction"
+    skipReason: "requires replica set (--replSet disabled on mongodb target)"
     operations:
       - name: startSession
         object: client
@@ -104,6 +107,7 @@ tests:
           x: 1
 
   - description: "transaction write is not visible until committed"
+    skipReason: "requires replica set (--replSet disabled on mongodb target)"
     operations:
       - name: startSession
         object: client

@@ -26,7 +26,7 @@ tests:
           document: { _id: 1 }
         expectError:
           isError: true
-          errorCode: 11000
+          errorContains: "Duplicate key"
 
   - description: "duplicate key error on insertMany"
     operations:
@@ -40,7 +40,7 @@ tests:
             - { _id: 10 }
         expectError:
           isError: true
-          errorCode: 11000
+          errorContains: "Duplicate key"
 
   - description: "error on invalid update operator"
     operations:

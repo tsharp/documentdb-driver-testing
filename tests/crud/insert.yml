@@ -69,4 +69,4 @@ tests:
           document: { _id: 99, x: 2 }
         expectError:
           isError: true
-          errorContains: "duplicate"
+          errorContains: "Duplicate key"

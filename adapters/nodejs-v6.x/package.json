@@ -1,0 +1,14 @@
+{
+  "name": "documentdb-driver-shim-nodejs-v6.x",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node.js driver shim using mongodb v6.x",
+  "dependencies": {
+    "mongodb": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
+  }
+}
