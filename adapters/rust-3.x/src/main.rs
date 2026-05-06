@@ -800,10 +800,18 @@ async fn handle_message(state: Arc<Mutex<ShimState>>, msg: InboundMessage) -> Ou
                 Ok(o) => o,
                 Err(e) => return err_response(id, format!("Bad operation payload: {e}"), None, None),
             };
+            let op_name = op.name.clone();
             let mut s = state.lock().await;
             match dispatch(&mut s, op).await {
                 Ok(result) => OutboundMessage { id, result: Some(result), error: None },
-                Err(e)     => err_response(id, e.message, e.code, None),
+                Err(e) => {
+                    eprintln!("[rust-shim] error (id={id} op={op_name}): {}", e.message);
+                    OutboundMessage {
+                        id,
+                        result: None,
+                        error: Some(ShimError { message: e.message, code: e.code, labels: None }),
+                    }
+                }
             }
         }
 

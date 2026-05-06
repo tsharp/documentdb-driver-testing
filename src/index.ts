@@ -9,6 +9,7 @@ import { TapReporter } from './reporters/TapReporter';
 import { JsonReporter } from './reporters/JsonReporter';
 import { JUnitReporter } from './reporters/JUnitReporter';
 import { MatrixJsonReporter } from './reporters/MatrixJsonReporter';
+import { withProgress } from './reporters/ProgressReporter';
 import { SubprocessAdapter } from './protocol/SubprocessAdapter';
 import type { DriverAdapter } from './protocol/DriverAdapter';
 
@@ -74,7 +75,10 @@ function adapterVersion(adapterName: string): string {
   return 'unknown';
 }
 
-function buildAdapter(name: string): DriverAdapter {
+function buildAdapter(
+  name: string,
+  onStderrLine?: (line: string) => void,
+): DriverAdapter {
   // Node.js subprocess adapters: run shim.ts via ts-node from the adapter's own dir
   // so that Node resolves `mongodb` from the adapter's local node_modules.
   if (name.startsWith('nodejs')) {
@@ -86,6 +90,7 @@ function buildAdapter(name: string): DriverAdapter {
       bin: 'node',
       args: ['-r', 'ts-node/register', shimPath],
       cwd: adapterDir,
+      onStderrLine,
     });
   }
   // Rust adapters: compiled binary
@@ -95,6 +100,7 @@ function buildAdapter(name: string): DriverAdapter {
       name,
       language: 'rust',
       bin: `adapters/${name}/target/release/shim${ext}`,
+      onStderrLine,
     });
   }
   // Generic versioned adapter fallback
@@ -105,6 +111,7 @@ function buildAdapter(name: string): DriverAdapter {
     name,
     language,
     bin: `adapters/${name}/target/release/shim${ext}`,
+    onStderrLine,
   });
 }
 
@@ -129,27 +136,33 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const adapters = adapterNames.map(buildAdapter);
   const scenarios = await loadScenarios(testFiles);
 
-  let reporter;
+  let baseReporter;
   if (reporterName === 'json') {
-    reporter = new JsonReporter();
+    baseReporter = new JsonReporter();
   } else if (reporterName === 'junit') {
-    reporter = new JUnitReporter(reportFile);
+    baseReporter = new JUnitReporter(reportFile);
   } else if (reporterName === 'matrix') {
     const adapterVersions = new Map(adapterNames.map((n) => [n, adapterVersion(n)]));
-    reporter = new MatrixJsonReporter(
+    baseReporter = new MatrixJsonReporter(
       reportFile,
       target,
       serverVersion ?? 'unknown',
       adapterVersions,
     );
   } else {
-    reporter = new TapReporter();
+    baseReporter = new TapReporter();
   }
 
-  const harness = new Harness(adapters, scenarios, reporter, { uri, serverVersion });
+  const { reporter, attachStderr } = withProgress(baseReporter);
+  const adapters = adapterNames.map((name) => {
+    const stderrOpts: { onStderrLine?: (line: string) => void } = {};
+    attachStderr(name, stderrOpts);
+    return buildAdapter(name, stderrOpts.onStderrLine);
+  });
+
+  const harness = new Harness(adapters, scenarios, reporter, { uri, serverVersion, target });
   await harness.run();
 }
 

@@ -70,3 +70,7 @@ tests:
         expectError:
           isError: true
           errorContains: "duplicate key"
+          overrides:
+            - target: "documentdb"
+              errorContains: "Duplicate key"
+              errorCode: 11000

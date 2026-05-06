@@ -27,6 +27,11 @@ tests:
         expectError:
           isError: true
           errorContains: "duplicate key"
+          errorCode: 11000
+          overrides:
+            - target: "documentdb"
+              errorContains: "Duplicate key"
+              errorCode: 11000
 
   - description: "duplicate key error on insertMany"
     operations:
@@ -41,6 +46,11 @@ tests:
         expectError:
           isError: true
           errorContains: "duplicate key"
+          errorCode: 11000
+          overrides:
+            - target: "documentdb"
+              errorContains: "Duplicate key"
+              errorCode: 11000
 
   - description: "error on invalid update operator"
     operations:

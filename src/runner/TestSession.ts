@@ -1,5 +1,6 @@
 import type { DriverAdapter } from '../protocol/DriverAdapter';
 import type {
+  ErrorOverride,
   ExpectedError,
   Operation,
   OperationResult,
@@ -20,6 +21,7 @@ export class TestSession {
     private readonly scenario: Scenario,
     private readonly reporter: Reporter,
     private readonly uri: string,
+    private readonly target: string = 'unknown',
   ) {}
 
   /** Connect once, run all test cases in the scenario, then disconnect. */
@@ -171,6 +173,28 @@ export class TestSession {
     return Object.entries(exp).every(([k, v]) => this.matches(act[k], v));
   }
 
+  /**
+   * Resolve the applicable override for the current adapter+target, using
+   * specificity order: (adapter+target) > (adapter-only) > (target-only) > none.
+   */
+  private resolveErrorOverride(overrides: ErrorOverride[] | undefined): ErrorOverride | undefined {
+    if (!overrides?.length) return undefined;
+    const adapterName = this.adapter.name;
+    const target = this.target;
+    // Most specific: both adapter and target match
+    const both = overrides.find(
+      (o) => o.adapter !== undefined && o.target !== undefined &&
+             o.adapter === adapterName && o.target === target,
+    );
+    if (both) return both;
+    // Adapter-only match
+    const byAdapter = overrides.find((o) => o.adapter !== undefined && o.target === undefined && o.adapter === adapterName);
+    if (byAdapter) return byAdapter;
+    // Target-only match
+    const byTarget = overrides.find((o) => o.target !== undefined && o.adapter === undefined && o.target === target);
+    return byTarget;
+  }
+
   private assertError(
     result: OperationResult,
     expected: ExpectedError,
@@ -182,15 +206,18 @@ export class TestSession {
         `Operation "${opName}" in "${label}" was expected to fail but succeeded`,
       );
     }
-    if (expected.errorContains && !result.error.message.includes(expected.errorContains)) {
+    const override = this.resolveErrorOverride(expected.overrides);
+    const errorContains = override?.errorContains ?? expected.errorContains;
+    const errorCode = override?.errorCode ?? expected.errorCode;
+    if (errorContains && !result.error.message.includes(errorContains)) {
       throw new Error(
-        `Expected error message to contain "${expected.errorContains}" in "${label}", ` +
+        `Expected error message to contain "${errorContains}" in "${label}", ` +
           `got: "${result.error.message}"`,
       );
     }
-    if (expected.errorCode !== undefined && result.error.code !== expected.errorCode) {
+    if (errorCode !== undefined && result.error.code !== errorCode) {
       throw new Error(
-        `Expected error code ${expected.errorCode} in "${label}", got: ${result.error.code}`,
+        `Expected error code ${errorCode} in "${label}", got: ${result.error.code}`,
       );
     }
     if (expected.errorLabelsContain) {

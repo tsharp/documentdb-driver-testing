@@ -12,6 +12,14 @@ export interface HarnessOptions {
    * Pass the value returned by `db.admin().command({ buildInfo: 1 }).version`.
    */
   serverVersion?: string;
+  /** Server target name (e.g. "mongodb", "documentdb"). Used for error overrides. */
+  target?: string;
+}
+
+/** Extract the adapter name from a test label like "[nodejs-v6.x] scenario > test". */
+function labelAdapter(label: string): string {
+  const m = /^\[([^\]]+)\]/.exec(label);
+  return m ? m[1] : label;
 }
 
 /**
@@ -33,6 +41,39 @@ export class Harness {
   }
 
   async run(): Promise<void> {
+    // Pre-count the number of test cases each adapter will actually run so
+    // reporters can show accurate progress totals before any test starts.
+    const adapterTotals = new Map<string, number>();
+    const adapterDone   = new Map<string, number>();
+    for (const adapter of this.adapters) {
+      let total = 0;
+      for (const scenario of this.scenarios) {
+        if (
+          !serverSatisfies(this.serverVersion, scenario.minServerVersion, scenario.maxServerVersion) ||
+          !adapterMatchesRunOn(adapter, scenario.runOn, this.serverVersion)
+        ) continue;
+        total += scenario.tests.length;
+      }
+      adapterTotals.set(adapter.name, total);
+      adapterDone.set(adapter.name, 0);
+    }
+
+    // Wrap reporter callbacks so we can inject testDone after every result.
+    const originalPass = this.reporter.pass.bind(this.reporter);
+    const originalFail = this.reporter.fail.bind(this.reporter);
+    const originalSkip = this.reporter.skip.bind(this.reporter);
+
+    const tick = (adapterName: string) => {
+      const done  = (adapterDone.get(adapterName) ?? 0) + 1;
+      const total = adapterTotals.get(adapterName) ?? 0;
+      adapterDone.set(adapterName, done);
+      this.reporter.testDone?.(adapterName, done, total);
+    };
+
+    this.reporter.pass = (label: string) => { originalPass(label); tick(labelAdapter(label)); };
+    this.reporter.fail = (label: string, err: Error) => { originalFail(label, err); tick(labelAdapter(label)); };
+    this.reporter.skip = (label: string, reason: string) => { originalSkip(label, reason); tick(labelAdapter(label)); };
+
     for (const scenario of this.scenarios) {
       if (
         !serverSatisfies(
@@ -54,11 +95,24 @@ export class Harness {
           continue;
         }
 
-        const session = new TestSession(adapter, scenario, this.reporter, this.options.uri);
+        // Signal beginAdapter the first time we encounter this adapter running a real test.
+        if ((adapterDone.get(adapter.name) ?? 0) === 0 && !this._begunAdapters.has(adapter.name)) {
+          this._begunAdapters.add(adapter.name);
+          this.reporter.beginAdapter?.(adapter.name, adapterTotals.get(adapter.name) ?? 0);
+        }
+
+        const session = new TestSession(adapter, scenario, this.reporter, this.options.uri, this.options.target ?? 'unknown');
         await session.execute();
       }
     }
 
+    // Restore original methods before summary so reporters behave normally.
+    this.reporter.pass = originalPass;
+    this.reporter.fail = originalFail;
+    this.reporter.skip = originalSkip;
+
     this.reporter.summary();
   }
+
+  private _begunAdapters = new Set<string>();
 }

@@ -32,8 +32,7 @@ use std::sync::Arc;
 
 use bson::{doc, Document};
 use mongodb::{
-    Client, ClientSession, Collection, IndexModel,
-    options::{
+    Client, ClientSession, Collection, IndexModel,    error::ErrorKind,    options::{
         ClientOptions, FindOptions, FindOneAndUpdateOptions, FindOneAndDeleteOptions,
         FindOneAndReplaceOptions, ReturnDocument, UpdateOptions, ReplaceOptions, IndexOptions,
     },
@@ -70,6 +69,45 @@ struct ShimError {
     labels: Option<Vec<String>>,
 }
 
+// ── Dispatch error (carries code for write/command errors) ────────────────────
+
+struct DispatchError {
+    message: String,
+    code: Option<i32>,
+}
+
+impl From<String> for DispatchError {
+    fn from(s: String) -> Self { DispatchError { message: s, code: None } }
+}
+
+impl From<&str> for DispatchError {
+    fn from(s: &str) -> Self { DispatchError { message: s.to_string(), code: None } }
+}
+
+/// Convert a mongodb driver error into a `DispatchError`, extracting write/
+/// command error codes where available.
+fn mongo_err(e: mongodb::error::Error) -> DispatchError {
+    use mongodb::error::WriteFailure;
+    let code: Option<i32> = match e.kind.as_ref() {
+        ErrorKind::Write(WriteFailure::WriteError(we)) => Some(we.code),
+        ErrorKind::BulkWrite(bw) => bw.write_errors.as_ref()
+            .and_then(|v| v.first())
+            .map(|we| we.code),
+        ErrorKind::Command(ce) => Some(ce.code),
+        _ => None,
+    };
+    let message = match e.kind.as_ref() {
+        ErrorKind::Write(WriteFailure::WriteError(we)) => we.message.clone(),
+        ErrorKind::BulkWrite(bw) => bw.write_errors.as_ref()
+            .and_then(|v| v.first())
+            .map(|we| we.message.clone())
+            .unwrap_or_else(|| e.kind.to_string()),
+        ErrorKind::Command(ce) => ce.message.clone(),
+        _ => e.to_string(),
+    };
+    DispatchError { message, code }
+}
+
 // ── Operation payload (mirrors types.ts) ──────────────────────────────────────
 
 #[derive(Deserialize, Debug)]
@@ -102,14 +140,14 @@ impl ShimState {
         }
     }
 
-    fn client(&self) -> Result<&Client, String> {
-        self.client.as_ref().ok_or_else(|| "Not connected".to_string())
+    fn client(&self) -> Result<&Client, DispatchError> {
+        self.client.as_ref().ok_or_else(|| DispatchError::from("Not connected"))
     }
 
-    fn require_session(&mut self, key: &str) -> Result<&mut ClientSession, String> {
+    fn require_session(&mut self, key: &str) -> Result<&mut ClientSession, DispatchError> {
         self.sessions
             .get_mut(key)
-            .ok_or_else(|| format!("No session with key \"{}\"", key))
+            .ok_or_else(|| DispatchError::from(format!("No session with key \"{}\"", key).as_str()))
     }
 }
 
@@ -171,7 +209,7 @@ fn collection<'a>(client: &'a Client, db: &Option<String>, coll: &Option<String>
 
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
-async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String> {
+async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, DispatchError> {
     let args = &op.arguments;
     let session_key = session_key_from_args(args);
 
@@ -185,7 +223,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let session = client
                 .start_session(None)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(mongo_err)?;
             let lsid = session.id().clone();
             let key = op.save_result_as
                 .clone()
@@ -212,19 +250,19 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
         // ── Transactions ───────────────────────────────────────────────────
         "startTransaction" => {
             let session = state.require_session(&op.object)?;
-            session.start_transaction(None).await.map_err(|e| e.to_string())?;
+            session.start_transaction(None).await.map_err(mongo_err)?;
             Ok(Value::Null)
         }
 
         "commitTransaction" => {
             let session = state.require_session(&op.object)?;
-            session.commit_transaction().await.map_err(|e| e.to_string())?;
+            session.commit_transaction().await.map_err(mongo_err)?;
             Ok(Value::Null)
         }
 
         "abortTransaction" => {
             let session = state.require_session(&op.object)?;
-            session.abort_transaction().await.map_err(|e| e.to_string())?;
+            session.abort_transaction().await.map_err(mongo_err)?;
             Ok(Value::Null)
         }
 
@@ -237,7 +275,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.insert_one_with_session(doc, None, session).await
             } else {
                 coll.insert_one(doc, None).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             Ok(serde_json::json!({
                 "acknowledged": true,
                 "insertedId": bson_to_value(&result.inserted_id),
@@ -259,7 +297,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.insert_many_with_session(docs, None, session).await
             } else {
                 coll.insert_many(docs, None).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             let ids: serde_json::Map<String, Value> = result
                 .inserted_ids
                 .iter()
@@ -277,7 +315,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.find_one_with_session(filter, None, session).await
             } else {
                 coll.find_one(filter, None).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
         }
 
@@ -295,7 +333,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 let session = state.require_session(key)?;
                 coll.find_with_session(filter, opts, session)
                     .await
-                    .map_err(|e| e.to_string())?
+                    .map_err(mongo_err)?
                     .stream(session)
                     .try_collect()
                     .await
@@ -303,10 +341,10 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             } else {
                 coll.find(filter, opts)
                     .await
-                    .map_err(|e| e.to_string())?
+                    .map_err(mongo_err)?
                     .try_collect()
                     .await
-                    .map_err(|e| e.to_string())?
+                    .map_err(mongo_err)?
             };
             Ok(bson_to_value(&docs))
         }
@@ -323,7 +361,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.update_one_with_session(filter, update, opts, session).await
             } else {
                 coll.update_one(filter, update, opts).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             let mut r = serde_json::json!({
                 "acknowledged": true,
                 "matchedCount":  result.matched_count,
@@ -345,7 +383,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.update_many_with_session(filter, update, None, session).await
             } else {
                 coll.update_many(filter, update, None).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             Ok(serde_json::json!({
                 "acknowledged": true,
                 "matchedCount":  result.matched_count,
@@ -365,7 +403,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.replace_one_with_session(filter, replacement, opts, session).await
             } else {
                 coll.replace_one(filter, replacement, opts).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             let mut r = serde_json::json!({
                 "acknowledged": true,
                 "matchedCount":  result.matched_count,
@@ -386,7 +424,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.delete_one_with_session(filter, None, session).await
             } else {
                 coll.delete_one(filter, None).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             Ok(serde_json::json!({ "acknowledged": true, "deletedCount": result.deleted_count }))
         }
 
@@ -399,7 +437,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.delete_many_with_session(filter, None, session).await
             } else {
                 coll.delete_many(filter, None).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             Ok(serde_json::json!({ "acknowledged": true, "deletedCount": result.deleted_count }))
         }
 
@@ -412,7 +450,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 coll.count_documents_with_session(filter, None, session).await
             } else {
                 coll.count_documents(filter, None).await
-            }.map_err(|e| e.to_string())?;
+            }.map_err(mongo_err)?;
             Ok(Value::Number(n.into()))
         }
 
@@ -436,26 +474,26 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                     if let Some(ref key) = session_key {
                         let session = state.require_session(key)?;
                         coll.aggregate_with_session(pipeline, None, session).await
-                            .map_err(|e| e.to_string())?
+                            .map_err(mongo_err)?
                             .stream(session)
                             .try_collect()
                             .await
                             .map_err(|e: mongodb::error::Error| e.to_string())?
                     } else {
                         coll.aggregate(pipeline, None).await
-                            .map_err(|e| e.to_string())?
+                            .map_err(mongo_err)?
                             .try_collect()
                             .await
-                            .map_err(|e| e.to_string())?
+                            .map_err(mongo_err)?
                     }
                 }
                 None => {
                     let db = client.database(db_name);
                     db.aggregate(pipeline, None).await
-                        .map_err(|e| e.to_string())?
+                        .map_err(mongo_err)?
                         .try_collect()
                         .await
-                        .map_err(|e| e.to_string())?
+                        .map_err(mongo_err)?
                 }
             };
             Ok(bson_to_value(&docs))
@@ -473,7 +511,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 .upsert(upsert)
                 .build();
             let result = coll.find_one_and_update(filter, update, opts)
-                .await.map_err(|e| e.to_string())?;
+                .await.map_err(mongo_err)?;
             Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
         }
 
@@ -483,7 +521,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let filter = value_to_doc(args.get("filter").unwrap_or(&Value::Null))?;
             let opts = FindOneAndDeleteOptions::builder().build();
             let result = coll.find_one_and_delete(filter, opts)
-                .await.map_err(|e| e.to_string())?;
+                .await.map_err(mongo_err)?;
             Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
         }
 
@@ -499,7 +537,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 .upsert(upsert)
                 .build();
             let result = coll.find_one_and_replace(filter, replacement, opts)
-                .await.map_err(|e| e.to_string())?;
+                .await.map_err(mongo_err)?;
             Ok(result.map(|d| bson_to_value(&d)).unwrap_or(Value::Null))
         }
 
@@ -509,7 +547,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let field = args.get("field").and_then(|v| v.as_str()).ok_or("Missing field")?;
             let filter = args.get("filter").map(value_to_doc).transpose()?;
             let result = coll.distinct(field, filter, None)
-                .await.map_err(|e| e.to_string())?;
+                .await.map_err(mongo_err)?;
             Ok(bson_to_value(&result))
         }
 
@@ -522,7 +560,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let unique: Option<bool> = index_opts_val.and_then(|o| o.get("unique")).and_then(|v| v.as_bool());
             let opts = IndexOptions::builder().name(name).unique(unique).build();
             let model = IndexModel::builder().keys(keys).options(opts).build();
-            let result = coll.create_index(model, None).await.map_err(|e| e.to_string())?;
+            let result = coll.create_index(model, None).await.map_err(mongo_err)?;
             Ok(Value::String(result.index_name))
         }
 
@@ -530,7 +568,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
         "dropIndex" => {
             let coll = collection(state.client()?, &op.database, &op.collection)?;
             let name = args.get("name").and_then(|v| v.as_str()).ok_or("Missing index name")?;
-            coll.drop_index(name, None).await.map_err(|e| e.to_string())?;
+            coll.drop_index(name, None).await.map_err(mongo_err)?;
             Ok(Value::Null)
         }
 
@@ -539,9 +577,9 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let coll = collection(state.client()?, &op.database, &op.collection)?;
             use futures_util::TryStreamExt;
             let indexes: Vec<_> = coll.list_indexes(None)
-                .await.map_err(|e| e.to_string())?
+                .await.map_err(mongo_err)?
                 .try_collect()
-                .await.map_err(|e| e.to_string())?;
+                .await.map_err(mongo_err)?;
             Ok(bson_to_value(&indexes))
         }
 
@@ -552,7 +590,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let result = state.client()?.database(db_name)
                 .run_command(cmd, None)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(mongo_err)?;
             Ok(bson_to_value(&result))
         }
 
@@ -563,10 +601,10 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let specs: Vec<_> = state.client()?.database(db_name)
                 .list_collections(None, None)
                 .await
-                .map_err(|e| e.to_string())?
+                .map_err(mongo_err)?
                 .try_collect()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(mongo_err)?;
             Ok(bson_to_value(&specs))
         }
 
@@ -580,7 +618,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
                 .collection::<Document>(coll_name)
                 .drop(None)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(mongo_err)?;
             Ok(Value::Null)
         }
 
@@ -592,7 +630,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             state.client()?.database(db_name)
                 .create_collection(coll_name, None)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(mongo_err)?;
             Ok(Value::Null)
         }
 
@@ -601,7 +639,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let names = state.client()?
                 .list_database_names(None, None)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(mongo_err)?;
             Ok(bson_to_value(&names))
         }
 
@@ -610,50 +648,50 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             let coll = collection(state.client()?, &op.database, &op.collection)?;
             let ordered = args.get("ordered").and_then(|v| v.as_bool()).unwrap_or(true);
             let requests = args.get("requests").and_then(|v| v.as_array())
-                .ok_or_else(|| "Missing requests array".to_string())?
+                .ok_or("Missing requests array")?
                 .clone();
             let mut inserted_count: i64 = 0;
             let mut matched_count: i64 = 0;
             let mut modified_count: i64 = 0;
             let mut deleted_count: i64 = 0;
-            let mut first_error: Option<String> = None;
+            let mut first_error: Option<DispatchError> = None;
             for req in &requests {
-                let op_result: Result<(), String> =
+                let op_result: Result<(), DispatchError> =
                     if let Some(ins) = req.get("insertOne") {
                         let doc = value_to_doc(ins.get("document").unwrap_or(&Value::Null))?;
                         coll.insert_one(doc, None).await
                             .map(|_| { inserted_count += 1; })
-                            .map_err(|e| e.to_string())
+                            .map_err(mongo_err)
                     } else if let Some(upd) = req.get("updateOne") {
                         let filter = value_to_doc(upd.get("filter").unwrap_or(&Value::Null))?;
                         let update = value_to_doc(upd.get("update").unwrap_or(&Value::Null))?;
                         coll.update_one(filter, update, None).await
                             .map(|r| { matched_count += r.matched_count as i64; modified_count += r.modified_count as i64; })
-                            .map_err(|e| e.to_string())
+                            .map_err(mongo_err)
                     } else if let Some(upd) = req.get("updateMany") {
                         let filter = value_to_doc(upd.get("filter").unwrap_or(&Value::Null))?;
                         let update = value_to_doc(upd.get("update").unwrap_or(&Value::Null))?;
                         coll.update_many(filter, update, None).await
                             .map(|r| { matched_count += r.matched_count as i64; modified_count += r.modified_count as i64; })
-                            .map_err(|e| e.to_string())
+                            .map_err(mongo_err)
                     } else if let Some(del) = req.get("deleteOne") {
                         let filter = value_to_doc(del.get("filter").unwrap_or(&Value::Null))?;
                         coll.delete_one(filter, None).await
                             .map(|r| { deleted_count += r.deleted_count as i64; })
-                            .map_err(|e| e.to_string())
+                            .map_err(mongo_err)
                     } else if let Some(del) = req.get("deleteMany") {
                         let filter = value_to_doc(del.get("filter").unwrap_or(&Value::Null))?;
                         coll.delete_many(filter, None).await
                             .map(|r| { deleted_count += r.deleted_count as i64; })
-                            .map_err(|e| e.to_string())
+                            .map_err(mongo_err)
                     } else if let Some(rep) = req.get("replaceOne") {
                         let filter = value_to_doc(rep.get("filter").unwrap_or(&Value::Null))?;
                         let replacement = value_to_doc(rep.get("replacement").unwrap_or(&Value::Null))?;
                         coll.replace_one(filter, replacement, None).await
                             .map(|r| { matched_count += r.matched_count as i64; modified_count += r.modified_count as i64; })
-                            .map_err(|e| e.to_string())
+                            .map_err(mongo_err)
                     } else {
-                        Err("Unknown write model in bulkWrite".to_string())
+                        Err("Unknown write model in bulkWrite".into())
                     };
                 match op_result {
                     Err(e) if ordered => return Err(e),
@@ -673,7 +711,7 @@ async fn dispatch(state: &mut ShimState, op: Operation) -> Result<Value, String>
             Ok(result)
         }
 
-        other => Err(format!("Unsupported operation: \"{other}\"")),
+        other => Err(format!("Unsupported operation: \"{other}\"").into()),
     }
 }
 
@@ -756,10 +794,18 @@ async fn handle_message(state: Arc<Mutex<ShimState>>, msg: InboundMessage) -> Ou
                 Ok(o) => o,
                 Err(e) => return err_response(id, format!("Bad operation payload: {e}"), None, None),
             };
+            let op_name = op.name.clone();
             let mut s = state.lock().await;
             match dispatch(&mut s, op).await {
                 Ok(result) => OutboundMessage { id, result: Some(result), error: None },
-                Err(msg)   => err_response(id, msg, None, None),
+                Err(e) => {
+                    eprintln!("[rust-shim] error (id={id} op={op_name}): {}", e.message);
+                    OutboundMessage {
+                        id,
+                        result: None,
+                        error: Some(ShimError { message: e.message, code: e.code, labels: None }),
+                    }
+                }
             }
         }
 

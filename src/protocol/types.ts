@@ -37,12 +37,28 @@ export interface Operation {
   expectError?: ExpectedError;
 }
 
+/**
+ * Per-adapter or per-server override for error assertions.
+ * Specify `adapter` (e.g. "rust-2.x"), `target` (e.g. "documentdb"), or both
+ * to scope the override. Omitted fields inherit from the parent `ExpectedError`.
+ */
+export interface ErrorOverride {
+  /** Matches the exact adapter name (e.g. "rust-2.x", "nodejs-v6.x"). */
+  adapter?: string;
+  /** Matches the target server name passed via --target (e.g. "documentdb", "mongodb"). */
+  target?: string;
+  errorContains?: string;
+  errorCode?: number;
+}
+
 export interface ExpectedError {
   isError: true;
   errorContains?: string;
   errorCode?: number;
   errorLabelsContain?: string[];
   errorLabelsOmit?: string[];
+  /** Per-adapter / per-target overrides for errorContains and errorCode. */
+  overrides?: ErrorOverride[];
 }
 
 export interface OperationResult {

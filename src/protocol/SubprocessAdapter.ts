@@ -20,7 +20,14 @@ export interface SubprocessAdapterOptions {
    * Use "java" for JAR-based shims.
    */
   runtime?: string;
-  /** Working directory for the spawned process. */
+  /**
+   * Optional callback invoked for each line the subprocess writes to stderr.
+   * When provided, stderr is piped rather than inherited; the callback receives
+   * each complete line (without the trailing newline).
+   * When omitted, stderr is inherited and goes directly to the parent process.
+   */
+  onStderrLine?: (line: string) => void;
+  /** Optional working directory for the spawned subprocess. */
   cwd?: string;
 }
 
@@ -76,9 +83,14 @@ export class SubprocessAdapter implements DriverAdapter {
       : [this.opts.bin, ...(this.opts.args ?? [])];
 
     this.proc = spawn(cmd, baseArgs, {
-      stdio: ['pipe', 'pipe', 'inherit'],
+      stdio: ['pipe', 'pipe', this.opts.onStderrLine ? 'pipe' : 'inherit'],
       ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
     });
+
+    if (this.opts.onStderrLine) {
+      const stderrRl = createInterface({ input: this.proc.stderr! });
+      stderrRl.on('line', (line) => this.opts.onStderrLine!(line));
+    }
 
     // Capture the pending map for THIS spawn so the exit listener only
     // rejects requests that belong to this process, not a future reconnect.
