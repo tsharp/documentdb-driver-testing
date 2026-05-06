@@ -1,0 +1,51 @@
+description: "Client Session Lifecycle"
+minServerVersion: "3.6"
+
+runOn:
+  - language: "*"
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: session_test
+
+tests:
+  - description: "startSession returns an object with lsid"
+    operations:
+      - name: startSession
+        object: client
+        saveResultAs: session0
+        expectResult:
+          lsid:
+            $$exists: true
+
+  - description: "session can be used in a write operation"
+    operations:
+      - name: startSession
+        object: client
+        saveResultAs: session0
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: session_test
+        arguments:
+          document: { _id: 1, value: "session write" }
+          session: $$session0
+        expectResult:
+          acknowledged: true
+      - name: endSession
+        object: session0
+
+  - description: "multiple concurrent sessions have distinct lsids"
+    operations:
+      - name: startSession
+        object: client
+        saveResultAs: session0
+      - name: startSession
+        object: client
+        saveResultAs: session1
+      - name: endSession
+        object: session0
+      - name: endSession
+        object: session1

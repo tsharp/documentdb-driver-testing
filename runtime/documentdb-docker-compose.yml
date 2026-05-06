@@ -1,0 +1,27 @@
+services:
+  documentdb:
+    image: ghcr.io/documentdb/documentdb/documentdb-local:latest
+    restart: unless-stopped
+    ports:
+      - "10260:10260"
+    command:
+      - --username
+      - ${TEST_USERNAME:-testuser}
+      - --password
+      - ${TEST_PASSWORD:-testpassword}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "--port", "10260",
+          "--tls",
+          "--tlsAllowInvalidCertificates",
+          "--username", "${TEST_USERNAME:-testuser}",
+          "--password", "${TEST_PASSWORD:-testpassword}",
+          "--eval", "db.adminCommand('ping')",
+        ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s

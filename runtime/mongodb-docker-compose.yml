@@ -1,0 +1,26 @@
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${TEST_USERNAME:-testuser}
+      MONGO_INITDB_ROOT_PASSWORD: ${TEST_PASSWORD:-testpassword}
+    healthcheck:
+      test:
+        [
+          "CMD", "mongosh",
+          "--username", "${TEST_USERNAME:-testuser}",
+          "--password", "${TEST_PASSWORD:-testpassword}",
+          "--eval", "db.adminCommand('ping')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  mongo-data:
