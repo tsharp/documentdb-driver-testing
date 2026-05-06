@@ -1,0 +1,180 @@
+description: "Query Operators"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: query_test
+    arguments:
+      documents:
+        - { _id: 1, x: 10, status: "active",   tags: ["a", "b"],    nested: { y: 1 } }
+        - { _id: 2, x: 20, status: "inactive", tags: ["b", "c"],    nested: { y: 2 } }
+        - { _id: 3, x: 30, status: "active",   tags: ["c", "d"],    nested: { y: 3 } }
+        - { _id: 4, x: 40, status: "inactive", tags: ["a"],         nested: { y: 4 } }
+        - { _id: 5, x: 50, status: "active",   tags: ["a", "b", "c"], nested: { y: 5 } }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: query_test
+
+tests:
+  - description: "$gt / $lt comparison operators"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { x: { $gt: 20, $lt: 50 } }
+        expectResult: 2
+
+  - description: "$gte / $lte comparison operators"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { x: { $gte: 20, $lte: 40 } }
+        expectResult: 3
+
+  - description: "$ne operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { status: { $ne: "active" } }
+        expectResult: 2
+
+  - description: "$in operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { x: { $in: [10, 30, 50] } }
+        expectResult: 3
+
+  - description: "$nin operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { x: { $nin: [10, 30, 50] } }
+        expectResult: 2
+
+  - description: "$and operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter:
+            $and:
+              - { status: "active" }
+              - { x: { $gt: 20 } }
+        expectResult: 2
+
+  - description: "$or operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter:
+            $or:
+              - { x: 10 }
+              - { x: 50 }
+        expectResult: 2
+
+  - description: "$not operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { x: { $not: { $gt: 30 } } }
+        expectResult: 3
+
+  - description: "$exists operator - field present"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { nested: { $exists: true } }
+        expectResult: 5
+
+  - description: "$exists operator - field absent"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { nonexistent: { $exists: false } }
+        expectResult: 5
+
+  - description: "dot notation on nested field"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { "nested.y": { $gt: 3 } }
+        expectResult: 2
+
+  - description: "$elemMatch on array field"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { tags: { $elemMatch: { $eq: "a" } } }
+        expectResult: 3
+
+  - description: "$size on array field"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { tags: { $size: 2 } }
+        expectResult: 3
+
+  - description: "$regex operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { status: { $regex: "^act" } }
+        expectResult: 3
+
+  - description: "$type operator"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: query_test
+        arguments:
+          filter: { x: { $type: "int" } }
+        expectResult: 5

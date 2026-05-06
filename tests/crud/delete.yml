@@ -1,0 +1,90 @@
+description: "CRUD - Delete Operations"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: delete_test
+    arguments:
+      documents:
+        - { _id: 1, category: "x" }
+        - { _id: 2, category: "y" }
+        - { _id: 3, category: "x" }
+        - { _id: 4, category: "x" }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: delete_test
+
+tests:
+  - description: "deleteOne removes a single document"
+    operations:
+      - name: deleteOne
+        object: collection
+        database: harness_test
+        collection: delete_test
+        arguments:
+          filter: { _id: 1 }
+        expectResult:
+          acknowledged: true
+          deletedCount: 1
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: delete_test
+        arguments:
+          filter: {}
+        expectResult: 3
+
+  - description: "deleteOne on no match returns deletedCount 0"
+    operations:
+      - name: deleteOne
+        object: collection
+        database: harness_test
+        collection: delete_test
+        arguments:
+          filter: { _id: 999 }
+        expectResult:
+          deletedCount: 0
+
+  - description: "deleteMany removes all matching documents"
+    operations:
+      - name: deleteMany
+        object: collection
+        database: harness_test
+        collection: delete_test
+        arguments:
+          filter: { category: "x" }
+        expectResult:
+          acknowledged: true
+          deletedCount: 3
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: delete_test
+        arguments:
+          filter: {}
+        expectResult: 1
+
+  - description: "deleteMany with empty filter removes all documents"
+    operations:
+      - name: deleteMany
+        object: collection
+        database: harness_test
+        collection: delete_test
+        arguments:
+          filter: {}
+        expectResult:
+          acknowledged: true
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: delete_test
+        arguments:
+          filter: {}
+        expectResult: 0

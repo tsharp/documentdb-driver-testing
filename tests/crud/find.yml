@@ -1,0 +1,92 @@
+description: "CRUD - Find Operations"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: find_test
+    arguments:
+      documents:
+        - { _id: 1, name: "Alice", age: 30, city: "Seattle" }
+        - { _id: 2, name: "Bob",   age: 25, city: "Portland" }
+        - { _id: 3, name: "Carol", age: 35, city: "Seattle" }
+        - { _id: 4, name: "Dave",  age: 28, city: "Portland" }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: find_test
+
+tests:
+  - description: "findOne returns the first matching document"
+    operations:
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: find_test
+        arguments:
+          filter: { _id: 1 }
+        expectResult:
+          _id: 1
+          name: "Alice"
+          age: 30
+
+  - description: "findOne with no match returns null"
+    operations:
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: find_test
+        arguments:
+          filter: { _id: 999 }
+        expectResult: null
+
+  - description: "find returns all matching documents"
+    operations:
+      - name: find
+        object: collection
+        database: harness_test
+        collection: find_test
+        arguments:
+          filter: { city: "Seattle" }
+        expectResult:
+          - { _id: 1, name: "Alice" }
+          - { _id: 3, name: "Carol" }
+
+  - description: "find with empty filter returns all documents"
+    operations:
+      - name: find
+        object: collection
+        database: harness_test
+        collection: find_test
+        arguments:
+          filter: {}
+        expectResult:
+          - { _id: 1 }
+          - { _id: 2 }
+          - { _id: 3 }
+          - { _id: 4 }
+
+  - description: "countDocuments returns correct count with filter"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: find_test
+        arguments:
+          filter: { city: "Portland" }
+        expectResult: 2
+
+  - description: "countDocuments with empty filter returns total"
+    operations:
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: find_test
+        arguments:
+          filter: {}
+        expectResult: 4

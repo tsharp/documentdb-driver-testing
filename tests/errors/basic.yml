@@ -1,0 +1,80 @@
+description: "Error Handling"
+
+runOn:
+  - language: "*"
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: error_test
+
+tests:
+  - description: "duplicate key error on insertOne"
+    operations:
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: error_test
+        arguments:
+          document: { _id: 1 }
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: error_test
+        arguments:
+          document: { _id: 1 }
+        expectError:
+          isError: true
+          errorCode: 11000
+
+  - description: "duplicate key error on insertMany"
+    operations:
+      - name: insertMany
+        object: collection
+        database: harness_test
+        collection: error_test
+        arguments:
+          documents:
+            - { _id: 10 }
+            - { _id: 10 }
+        expectError:
+          isError: true
+          errorCode: 11000
+
+  - description: "error on invalid update operator"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: error_test
+        arguments:
+          filter: { _id: 1 }
+          update: { _id: 1, badField: "replacement without $set" }
+        expectError:
+          isError: true
+
+  - description: "operation succeeds after an earlier error"
+    operations:
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: error_test
+        arguments:
+          document: { _id: 50 }
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: error_test
+        arguments:
+          document: { _id: 50 }
+        expectError:
+          isError: true
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: error_test
+        arguments:
+          filter: { _id: 50 }
+        expectResult:
+          _id: 50

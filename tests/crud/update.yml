@@ -1,0 +1,146 @@
+description: "CRUD - Update Operations"
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertMany
+    object: collection
+    database: harness_test
+    collection: update_test
+    arguments:
+      documents:
+        - { _id: 1, name: "Alice", score: 10, tags: ["a", "b"] }
+        - { _id: 2, name: "Bob",   score: 20, tags: ["b", "c"] }
+        - { _id: 3, name: "Carol", score: 10, tags: ["a"] }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: update_test
+
+tests:
+  - description: "updateOne with $set modifies a single document"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 1 }
+          update: { $set: { score: 99 } }
+        expectResult:
+          acknowledged: true
+          matchedCount: 1
+          modifiedCount: 1
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 1 }
+        expectResult:
+          score: 99
+
+  - description: "updateOne on no match returns matchedCount 0"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 999 }
+          update: { $set: { score: 0 } }
+        expectResult:
+          matchedCount: 0
+          modifiedCount: 0
+
+  - description: "updateMany modifies all matching documents"
+    operations:
+      - name: updateMany
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { score: 10 }
+          update: { $set: { score: 0 } }
+        expectResult:
+          acknowledged: true
+          matchedCount: 2
+          modifiedCount: 2
+
+  - description: "updateOne with $inc increments a field"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 2 }
+          update: { $inc: { score: 5 } }
+        expectResult:
+          modifiedCount: 1
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 2 }
+        expectResult:
+          score: 25
+
+  - description: "updateOne with $push appends to an array"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 1 }
+          update: { $push: { tags: "z" } }
+        expectResult:
+          modifiedCount: 1
+
+  - description: "updateOne with $unset removes a field"
+    operations:
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 3 }
+          update: { $unset: { tags: "" } }
+        expectResult:
+          modifiedCount: 1
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 3 }
+        expectResult:
+          _id: 3
+          name: "Carol"
+
+  - description: "replaceOne replaces the full document"
+    operations:
+      - name: replaceOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 2 }
+          replacement: { _id: 2, name: "Robert", score: 100 }
+        expectResult:
+          matchedCount: 1
+          modifiedCount: 1
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: update_test
+        arguments:
+          filter: { _id: 2 }
+        expectResult:
+          name: "Robert"
+          score: 100

@@ -1,0 +1,72 @@
+description: "CRUD - Insert Operations"
+
+runOn:
+  - language: "*"
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: insert_test
+
+tests:
+  - description: "insertOne returns acknowledged with insertedId"
+    operations:
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: insert_test
+        arguments:
+          document: { _id: 1, name: "Alice" }
+        expectResult:
+          acknowledged: true
+          insertedId: 1
+
+  - description: "insertOne with generated _id returns acknowledged"
+    operations:
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: insert_test
+        arguments:
+          document: { name: "Bob" }
+        expectResult:
+          acknowledged: true
+          insertedId:
+            $$exists: true
+
+  - description: "insertMany inserts all documents"
+    operations:
+      - name: insertMany
+        object: collection
+        database: harness_test
+        collection: insert_test
+        arguments:
+          documents:
+            - { _id: 10, val: "a" }
+            - { _id: 11, val: "b" }
+            - { _id: 12, val: "c" }
+        expectResult:
+          acknowledged: true
+          insertedIds:
+            "0": 10
+            "1": 11
+            "2": 12
+
+  - description: "insertOne duplicate _id returns an error"
+    operations:
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: insert_test
+        arguments:
+          document: { _id: 99, x: 1 }
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: insert_test
+        arguments:
+          document: { _id: 99, x: 2 }
+        expectError:
+          isError: true
+          errorContains: "duplicate"

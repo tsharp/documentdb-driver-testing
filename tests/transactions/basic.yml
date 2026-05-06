@@ -1,0 +1,137 @@
+description: "Transactions"
+minServerVersion: "4.0"
+
+runOn:
+  - language: "*"
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: txn_test
+
+tests:
+  - description: "committed transaction makes writes visible"
+    operations:
+      - name: startSession
+        object: client
+        saveResultAs: session0
+      - name: startTransaction
+        object: session0
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          document: { _id: 1, committed: true }
+          session: $$session0
+      - name: commitTransaction
+        object: session0
+      - name: endSession
+        object: session0
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          filter: { _id: 1 }
+        expectResult:
+          _id: 1
+          committed: true
+
+  - description: "aborted transaction rolls back writes"
+    operations:
+      - name: startSession
+        object: client
+        saveResultAs: session0
+      - name: startTransaction
+        object: session0
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          document: { _id: 2, aborted: true }
+          session: $$session0
+      - name: abortTransaction
+        object: session0
+      - name: endSession
+        object: session0
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          filter: { _id: 2 }
+        expectResult: null
+
+  - description: "multiple write operations in a single transaction"
+    operations:
+      - name: startSession
+        object: client
+        saveResultAs: session0
+      - name: startTransaction
+        object: session0
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          document: { _id: 10, x: 0 }
+          session: $$session0
+      - name: updateOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          filter: { _id: 10 }
+          update: { $set: { x: 1 } }
+          session: $$session0
+        expectResult:
+          matchedCount: 1
+      - name: commitTransaction
+        object: session0
+      - name: endSession
+        object: session0
+      - name: findOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          filter: { _id: 10 }
+        expectResult:
+          _id: 10
+          x: 1
+
+  - description: "transaction write is not visible until committed"
+    operations:
+      - name: startSession
+        object: client
+        saveResultAs: session0
+      - name: startTransaction
+        object: session0
+      - name: insertOne
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          document: { _id: 20 }
+          session: $$session0
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          filter: { _id: 20 }
+        expectResult: 0
+      - name: commitTransaction
+        object: session0
+      - name: endSession
+        object: session0
+      - name: countDocuments
+        object: collection
+        database: harness_test
+        collection: txn_test
+        arguments:
+          filter: { _id: 20 }
+        expectResult: 1

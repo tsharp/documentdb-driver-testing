@@ -75,6 +75,10 @@ export class SubprocessAdapter implements DriverAdapter {
 
     this.proc = spawn(cmd, baseArgs, { stdio: ['pipe', 'pipe', 'inherit'] });
 
+    // Capture the pending map for THIS spawn so the exit listener only
+    // rejects requests that belong to this process, not a future reconnect.
+    const spawnPending = this.pending;
+
     this.rl = createInterface({ input: this.proc.stdout! });
     this.rl.on('line', (line) => {
       let msg: InboundMessage;
@@ -83,16 +87,16 @@ export class SubprocessAdapter implements DriverAdapter {
       } catch {
         return; // malformed line — ignore
       }
-      const pending = this.pending.get(msg.id);
+      const pending = spawnPending.get(msg.id);
       if (!pending) return;
-      this.pending.delete(msg.id);
+      spawnPending.delete(msg.id);
       pending.resolve(msg.error ? { error: msg.error } : { result: msg.result });
     });
 
     this.proc.on('exit', (code) => {
       const err = new Error(`Subprocess "${this.name}" exited with code ${code}`);
-      for (const { reject } of this.pending.values()) reject(err);
-      this.pending.clear();
+      for (const { reject } of spawnPending.values()) reject(err);
+      spawnPending.clear();
     });
   }
 
@@ -123,6 +127,8 @@ export class SubprocessAdapter implements DriverAdapter {
     this.proc = null;
     this.rl = null;
     this.nextId = 1;
+    // Fresh map so the next spawn's exit listener doesn't touch stale entries.
+    this.pending = new Map();
   }
 
   async runOperation(op: Operation): Promise<OperationResult> {
