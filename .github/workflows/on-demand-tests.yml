@@ -1,7 +1,18 @@
-name: On-demand tests
+name: On-demand compatibility matrix
 
 on:
   workflow_dispatch:
+    inputs:
+      mongodb_version:
+        description: MongoDB Docker image tag
+        required: true
+        default: '7'
+        type: string
+      documentdb_version:
+        description: DocumentDB Local Docker image tag
+        required: true
+        default: latest
+        type: string
 
 permissions:
   contents: read
@@ -12,9 +23,144 @@ concurrency:
 
 jobs:
   test:
-    name: Node.js driver against MongoDB 7
+    name: ${{ matrix.target }} / ${{ matrix.adapter }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - mongodb
+          - documentdb
+        adapter:
+          - nodejs-v6.x
+          - nodejs-v7.2.0
+          - rust-2.x
+          - rust-3.x
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up Rust
+        if: startsWith(matrix.adapter, 'rust-')
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install harness dependencies
+        run: npm ci
+
+      - name: Build harness
+        run: npm run build
+
+      - name: Build driver adapter
+        env:
+          ADAPTER: ${{ matrix.adapter }}
+        run: |
+          if [[ "$ADAPTER" == nodejs-* ]]; then
+            npm ci --prefix "adapters/$ADAPTER"
+          else
+            cargo build --release --manifest-path "adapters/$ADAPTER/Cargo.toml"
+          fi
+
+      - name: Start target
+        id: target
+        env:
+          TARGET: ${{ matrix.target }}
+          MONGODB_VERSION: ${{ inputs.mongodb_version }}
+          DOCUMENTDB_VERSION: ${{ inputs.documentdb_version }}
+        run: |
+          if [[ "$TARGET" == mongodb ]]; then
+            docker run --detach --name mongodb --publish 27017:27017 \
+              "mongo:$MONGODB_VERSION" --replSet rs0 --bind_ip_all
+
+            for attempt in {1..30}; do
+              if docker exec mongodb mongosh --quiet --eval \
+                "db.adminCommand({ ping: 1 }).ok" | grep -q 1; then
+                break
+              fi
+              if [[ "$attempt" -eq 30 ]]; then
+                docker logs mongodb
+                exit 1
+              fi
+              sleep 2
+            done
+
+            docker exec mongodb mongosh --quiet --eval \
+              "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})"
+
+            for attempt in {1..30}; do
+              if docker exec mongodb mongosh --quiet --eval \
+                "db.hello().isWritablePrimary" | grep -q true; then
+                break
+              fi
+              if [[ "$attempt" -eq 30 ]]; then
+                docker logs mongodb
+                exit 1
+              fi
+              sleep 2
+            done
+
+            echo 'uri=mongodb://localhost:27017/?replicaSet=rs0' >> "$GITHUB_OUTPUT"
+          else
+            docker run --detach --name documentdb --publish 10260:10260 \
+              "ghcr.io/documentdb/documentdb/documentdb-local:$DOCUMENTDB_VERSION" \
+              --username testuser --password testpassword
+
+            for attempt in {1..40}; do
+              if docker exec documentdb mongosh --quiet --port 10260 \
+                --tls --tlsAllowInvalidCertificates \
+                --username testuser --password testpassword \
+                --eval "db.adminCommand({ ping: 1 }).ok" | grep -q 1; then
+                break
+              fi
+              if [[ "$attempt" -eq 40 ]]; then
+                docker logs documentdb
+                exit 1
+              fi
+              sleep 3
+            done
+
+            echo 'uri=mongodb://testuser:testpassword@localhost:10260/?tls=true&tlsAllowInvalidCertificates=true&directConnection=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run test suite
+        env:
+          ADAPTER: ${{ matrix.adapter }}
+          TARGET: ${{ matrix.target }}
+          URI: ${{ steps.target.outputs.uri }}
+        run: |
+          mkdir -p out
+          npm run harness -- \
+            --adapters "$ADAPTER" \
+            --tests 'tests/**/*.yml' \
+            --uri "$URI" \
+            --target "$TARGET" \
+            --reporter junit \
+            --report-file "out/test-results-$TARGET-$ADAPTER.xml" \
+            --matrix-report-file "out/results-$TARGET-$ADAPTER.json"
+
+      - name: Upload cell results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.target }}-${{ matrix.adapter }}
+          path: |
+            out/test-results-${{ matrix.target }}-${{ matrix.adapter }}.xml
+            out/results-${{ matrix.target }}-${{ matrix.adapter }}.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  report:
+    name: Combined HTML report
+    if: always()
+    needs: test
+    runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
@@ -29,65 +175,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
-
-      - name: Start MongoDB replica set
-        run: |
-          docker run --detach --name mongodb --publish 27017:27017 \
-            mongo:7 --replSet rs0 --bind_ip_all
-
-          for attempt in {1..30}; do
-            if docker exec mongodb mongosh --quiet --eval \
-              "db.adminCommand({ ping: 1 }).ok" | grep -q 1; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              docker logs mongodb
-              exit 1
-            fi
-            sleep 2
-          done
-
-          docker exec mongodb mongosh --quiet --eval \
-            "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})"
-
-          for attempt in {1..30}; do
-            if docker exec mongodb mongosh --quiet --eval \
-              "db.hello().isWritablePrimary" | grep -q true; then
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              docker logs mongodb
-              exit 1
-            fi
-            sleep 2
-          done
-
-      - name: Run test suite
-        run: |
-          mkdir -p out
-          server_version=$(docker exec mongodb mongosh --quiet --eval "db.version()")
-          npm test -- \
-            --uri 'mongodb://localhost:27017/?replicaSet=rs0' \
-            --target mongodb \
-            --server-version "$server_version" \
-            --reporter junit \
-            --report-file out/test-results.xml \
-            --matrix-report-file out/results-mongodb-nodejs.json
+      - name: Download matrix results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          path: out
+          merge-multiple: true
 
       - name: Generate HTML report
-        if: ${{ always() && hashFiles('out/results-*.json') != '' }}
         run: npx ts-node src/report/generate.ts --output out/report.html 'out/results-*.json'
 
-      - name: Upload test results
-        if: always()
+      - name: Upload HTML report
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: compatibility-matrix
           path: |
-            out/test-results.xml
             out/report.html
-            out/results-mongodb-nodejs.json
-          if-no-files-found: warn
+            out/results-*.json
+          if-no-files-found: error
           retention-days: 14
