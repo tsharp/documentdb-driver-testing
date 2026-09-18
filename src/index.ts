@@ -9,13 +9,23 @@ import { TapReporter } from './reporters/TapReporter';
 import { JsonReporter } from './reporters/JsonReporter';
 import { JUnitReporter } from './reporters/JUnitReporter';
 import { MatrixJsonReporter } from './reporters/MatrixJsonReporter';
+import { CompositeReporter } from './reporters/CompositeReporter';
 import { withProgress } from './reporters/ProgressReporter';
 import { SubprocessAdapter } from './protocol/SubprocessAdapter';
 import type { DriverAdapter } from './protocol/DriverAdapter';
 import { NodejsDriverAdapter } from '../adapters/nodejs';
 
 const argv = minimist(process.argv.slice(2), {
-  string: ['adapters', 'tests', 'uri', 'reporter', 'report-file', 'target', 'server-version'],
+  string: [
+    'adapters',
+    'tests',
+    'uri',
+    'reporter',
+    'report-file',
+    'matrix-report-file',
+    'target',
+    'server-version',
+  ],
   default: {
     adapters: 'nodejs-v6.x',
     tests: 'tests/**/*.yml',
@@ -129,10 +139,13 @@ async function main(): Promise<void> {
   const uri = String(argv['uri']);
   const reporterName = String(argv['reporter']);
   const reportFile = String(argv['report-file']);
+  const matrixReportFile = argv['matrix-report-file'] as string | undefined;
   const target = String(argv['target']);
   const serverVersion =
     (argv['server-version'] as string | undefined) ??
-    (reporterName === 'matrix' ? await detectServerVersion(uri) : undefined);
+    (reporterName === 'matrix' || matrixReportFile !== undefined
+      ? await detectServerVersion(uri)
+      : undefined);
 
   const testFiles = await fg(testGlob, { absolute: true });
   if (testFiles.length === 0) {
@@ -157,6 +170,19 @@ async function main(): Promise<void> {
     );
   } else {
     baseReporter = new TapReporter();
+  }
+
+  if (matrixReportFile !== undefined && reporterName !== 'matrix') {
+    const adapterVersions = new Map(adapterNames.map((n) => [n, adapterVersion(n)]));
+    baseReporter = new CompositeReporter([
+      baseReporter,
+      new MatrixJsonReporter(
+        matrixReportFile,
+        target,
+        serverVersion ?? 'unknown',
+        adapterVersions,
+      ),
+    ]);
   }
 
   const { reporter, attachStderr } = withProgress(baseReporter);

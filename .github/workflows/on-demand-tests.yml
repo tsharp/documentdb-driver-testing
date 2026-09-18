@@ -73,13 +73,21 @@ jobs:
             --target mongodb \
             --server-version "$server_version" \
             --reporter junit \
-            --report-file out/test-results.xml
+            --report-file out/test-results.xml \
+            --matrix-report-file out/results-mongodb-nodejs.json
+
+      - name: Generate HTML report
+        if: ${{ always() && hashFiles('out/results-*.json') != '' }}
+        run: npx ts-node src/report/generate.ts --output out/report.html 'out/results-*.json'
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: daily-test-results
-          path: out/test-results.xml
+          name: test-results
+          path: |
+            out/test-results.xml
+            out/report.html
+            out/results-mongodb-nodejs.json
           if-no-files-found: warn
           retention-days: 14

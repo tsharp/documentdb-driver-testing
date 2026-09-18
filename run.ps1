@@ -7,16 +7,16 @@
     harness against the selected target.
 
 .PARAMETER Action
-    build   – compile out-of-process adapters (e.g. Rust shim)
-    start   – bring the container up and wait until healthy
-    stop    – tear the container down
-    test    – run the harness against a running target
-    ci      – start → test → stop in one step (builds adapters first)
-    report  – aggregate results-*.json files into a single HTML matrix report
+    build   - compile out-of-process adapters (e.g. Rust shim)
+    start   - bring the container up and wait until healthy
+    stop    - tear the container down
+    test    - run the harness against a running target
+    ci      - start → test → stop in one step (builds adapters first)
+    report  - aggregate results-*.json files into a single HTML matrix report
 
 .PARAMETER Target
-    mongodb     – MongoDB 7 on port 27017
-    documentdb  – DocumentDB local on port 10260
+    mongodb     - MongoDB 7 on port 27017
+    documentdb  - DocumentDB local on port 10260
 
 .PARAMETER Adapters
     Comma-separated list of adapters to test. Defaults to "nodejs".
