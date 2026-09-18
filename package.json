@@ -2,7 +2,7 @@
   "name": "documentdb-driver-testing",
   "version": "0.1.0",
   "private": true,
-  "description": "Driver validation for DocumentDB and MongoDB-compliant systems",
+  "description": "Driver Validation for DocumentDb and Mongo Wire Compatible Systems",
   "scripts": {
     "build": "tsc",
     "harness": "ts-node src/index.ts",

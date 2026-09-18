@@ -12,6 +12,7 @@ import { MatrixJsonReporter } from './reporters/MatrixJsonReporter';
 import { withProgress } from './reporters/ProgressReporter';
 import { SubprocessAdapter } from './protocol/SubprocessAdapter';
 import type { DriverAdapter } from './protocol/DriverAdapter';
+import { NodejsDriverAdapter } from '../adapters/nodejs';
 
 const argv = minimist(process.argv.slice(2), {
   string: ['adapters', 'tests', 'uri', 'reporter', 'report-file', 'target', 'server-version'],
@@ -79,6 +80,9 @@ function buildAdapter(
   name: string,
   onStderrLine?: (line: string) => void,
 ): DriverAdapter {
+  if (name === 'nodejs') {
+    return new NodejsDriverAdapter();
+  }
   // Node.js subprocess adapters: run shim.ts via ts-node from the adapter's own dir
   // so that Node resolves `mongodb` from the adapter's local node_modules.
   if (name.startsWith('nodejs')) {

@@ -1,0 +1,85 @@
+name: On-demand tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: on-demand-tests
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node.js driver against MongoDB 7
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Start MongoDB replica set
+        run: |
+          docker run --detach --name mongodb --publish 27017:27017 \
+            mongo:7 --replSet rs0 --bind_ip_all
+
+          for attempt in {1..30}; do
+            if docker exec mongodb mongosh --quiet --eval \
+              "db.adminCommand({ ping: 1 }).ok" | grep -q 1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs mongodb
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker exec mongodb mongosh --quiet --eval \
+            "rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]})"
+
+          for attempt in {1..30}; do
+            if docker exec mongodb mongosh --quiet --eval \
+              "db.hello().isWritablePrimary" | grep -q true; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs mongodb
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Run test suite
+        run: |
+          mkdir -p out
+          server_version=$(docker exec mongodb mongosh --quiet --eval "db.version()")
+          npm test -- \
+            --uri 'mongodb://localhost:27017/?replicaSet=rs0' \
+            --target mongodb \
+            --server-version "$server_version" \
+            --reporter junit \
+            --report-file out/test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-test-results
+          path: out/test-results.xml
+          if-no-files-found: warn
+          retention-days: 14
