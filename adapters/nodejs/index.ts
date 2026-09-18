@@ -152,23 +152,76 @@ export class NodejsDriverAdapter implements DriverAdapter {
 
       case 'findOne': {
         const coll = this.client.db(op.database!).collection(op.collection!);
-        return coll.findOne((args['filter'] ?? {}) as object, { session: sessionOpt });
+        return coll.findOne((args['filter'] ?? {}) as object, {
+          session: sessionOpt,
+          ...(args['projection'] ? { projection: args['projection'] as object } : {}),
+        });
       }
 
       case 'find': {
         const coll = this.client.db(op.database!).collection(op.collection!);
-        return coll
-          .find((args['filter'] ?? {}) as object, { session: sessionOpt })
-          .toArray();
+        const cursor = coll.find((args['filter'] ?? {}) as object, { session: sessionOpt });
+        if (args['sort']) cursor.sort(args['sort'] as Parameters<typeof cursor.sort>[0]);
+        if (args['projection']) cursor.project(args['projection'] as object);
+        if (typeof args['skip'] === 'number') cursor.skip(args['skip']);
+        if (typeof args['limit'] === 'number') cursor.limit(args['limit']);
+        return cursor.toArray();
+      }
+
+      case 'findOneAndUpdate': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        return coll.findOneAndUpdate(
+          args['filter'] as object,
+          args['update'] as object,
+          {
+            session: sessionOpt,
+            returnDocument: args['returnDocument'] === 'after' ? 'after' : 'before',
+            upsert: args['upsert'] === true,
+            ...(args['sort'] ? { sort: args['sort'] as unknown as import('mongodb').Sort } : {}),
+            ...(args['projection'] ? { projection: args['projection'] as object } : {}),
+          },
+        );
+      }
+
+      case 'findOneAndDelete': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        return coll.findOneAndDelete(
+          args['filter'] as object,
+          {
+            session: sessionOpt,
+            ...(args['sort'] ? { sort: args['sort'] as unknown as import('mongodb').Sort } : {}),
+            ...(args['projection'] ? { projection: args['projection'] as object } : {}),
+          },
+        );
+      }
+
+      case 'findOneAndReplace': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        return coll.findOneAndReplace(
+          args['filter'] as object,
+          args['replacement'] as object,
+          {
+            session: sessionOpt,
+            returnDocument: args['returnDocument'] === 'after' ? 'after' : 'before',
+            upsert: args['upsert'] === true,
+            ...(args['projection'] ? { projection: args['projection'] as object } : {}),
+          },
+        );
       }
 
       case 'updateOne': {
         const coll = this.client.db(op.database!).collection(op.collection!);
-        return coll.updateOne(
+        const result = await coll.updateOne(
           args['filter'] as object,
           args['update'] as object,
-          { session: sessionOpt },
+          { session: sessionOpt, upsert: args['upsert'] === true },
         );
+        return {
+          acknowledged: result.acknowledged,
+          matchedCount: result.matchedCount,
+          modifiedCount: result.modifiedCount,
+          ...(result.upsertedId != null ? { upsertedId: result.upsertedId } : {}),
+        };
       }
 
       case 'updateMany': {
@@ -182,11 +235,17 @@ export class NodejsDriverAdapter implements DriverAdapter {
 
       case 'replaceOne': {
         const coll = this.client.db(op.database!).collection(op.collection!);
-        return coll.replaceOne(
+        const result = await coll.replaceOne(
           args['filter'] as object,
           args['replacement'] as object,
-          { session: sessionOpt },
+          { session: sessionOpt, upsert: args['upsert'] === true },
         );
+        return {
+          acknowledged: result.acknowledged,
+          matchedCount: result.matchedCount,
+          modifiedCount: result.modifiedCount,
+          ...(result.upsertedId != null ? { upsertedId: result.upsertedId } : {}),
+        };
       }
 
       case 'deleteOne': {
@@ -214,6 +273,42 @@ export class NodejsDriverAdapter implements DriverAdapter {
           ? db.collection(op.collection).aggregate(pipeline, { session: sessionOpt })
           : db.aggregate(pipeline, { session: sessionOpt });
         return cursor.toArray();
+      }
+
+      case 'distinct': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        return coll.distinct(
+          args['field'] as string,
+          (args['filter'] ?? {}) as object,
+          { session: sessionOpt },
+        );
+      }
+
+      case 'bulkWrite': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        return coll.bulkWrite(
+          args['requests'] as import('mongodb').AnyBulkWriteOperation[],
+          { ordered: args['ordered'] !== false, session: sessionOpt },
+        );
+      }
+
+      case 'createIndex': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        const options = (args['options'] as Record<string, unknown>) ?? {};
+        return coll.createIndex(
+          args['keys'] as import('mongodb').IndexSpecification,
+          { ...options, session: sessionOpt },
+        );
+      }
+
+      case 'dropIndex': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        return coll.dropIndex(args['name'] as string, { session: sessionOpt });
+      }
+
+      case 'listIndexes': {
+        const coll = this.client.db(op.database!).collection(op.collection!);
+        return coll.listIndexes().toArray();
       }
 
       // ── Database / admin ───────────────────────────────────────────────

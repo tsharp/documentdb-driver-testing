@@ -28,6 +28,7 @@ export class JUnitReporter implements Reporter {
 
   fail(label: string, err: Error): void {
     this.results.push({ ...this.parseLabel(label), status: 'fail', message: err.message });
+    console.error(`FAIL: ${label}\n${err.message}`);
   }
 
   skip(label: string, reason: string): void {
