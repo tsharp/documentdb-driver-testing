@@ -20,7 +20,7 @@
 
 .PARAMETER Adapters
     Comma-separated list of adapters to test. Defaults to "nodejs".
-    Use "nodejs,rust" to test both adapters against the same target.
+    Use "nodejs,mongoose-9.x,rust" to test multiple adapters against the same target.
 
 .PARAMETER Reporter
     Reporter format: tap (default), json, junit, or matrix.
@@ -184,9 +184,9 @@ function Invoke-Tests {
 function Invoke-Build {
     Write-Host "Building out-of-process adapters..."
 
-    # ── Node.js versioned adapters ────────────────────────────────────────────
+    # ── Node.js and Mongoose versioned adapters ───────────────────────────────
     $nodeDirs = Get-ChildItem -Path (Join-Path $PSScriptRoot 'adapters') -Directory |
-        Where-Object { $_.Name -match '^nodejs-' }
+        Where-Object { $_.Name -match '^(nodejs|mongoose)-' }
 
     foreach ($dir in $nodeDirs) {
         if (Test-Path (Join-Path $dir.FullName 'package.json')) {

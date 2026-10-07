@@ -11,6 +11,6 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*", "adapters/nodejs/**/*"],
+  "include": ["src/**/*", "adapters/nodejs/**/*", "adapters/mongoose-shared/**/*"],
   "exclude": ["node_modules", "dist"]
 }

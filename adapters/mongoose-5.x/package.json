@@ -1,0 +1,14 @@
+{
+  "name": "documentdb-driver-shim-mongoose-5.x",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mongoose 5.x shim for the DocumentDB driver test harness",
+  "dependencies": {
+    "mongoose": "5.13.23"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -76,6 +76,10 @@ function adapterVersion(adapterName: string): string {
   // Rust adapters: read version from Cargo.toml
   const cargoPath = `adapters/${adapterName}/Cargo.toml`;
   if (existsSync(cargoPath)) return readCargoVersion(cargoPath);
+  // Mongoose adapters: read mongoose from the adapter's own node_modules
+  if (adapterName.startsWith('mongoose-')) {
+    return readPackageVersion(`adapters/${adapterName}/node_modules/mongoose/package.json`);
+  }
   // Node.js adapters: read the mongodb version from the adapter's own node_modules
   if (adapterName.startsWith('nodejs')) {
     const localPkg = `adapters/${adapterName}/node_modules/mongodb/package.json`;
@@ -92,6 +96,19 @@ function buildAdapter(
 ): DriverAdapter {
   if (name === 'nodejs') {
     return new NodejsDriverAdapter();
+  }
+  // Mongoose subprocess adapters resolve their selected major from their own dir.
+  if (name.startsWith('mongoose-')) {
+    const adapterDir = resolve(`adapters/${name}`);
+    const shimPath = resolve(`adapters/${name}/shim.ts`);
+    return new SubprocessAdapter({
+      name,
+      language: 'mongoose',
+      bin: 'node',
+      args: ['-r', 'ts-node/register/transpile-only', shimPath],
+      cwd: adapterDir,
+      onStderrLine,
+    });
   }
   // Node.js subprocess adapters: run shim.ts via ts-node from the adapter's own dir
   // so that Node resolves `mongodb` from the adapter's local node_modules.
