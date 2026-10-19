@@ -1,0 +1,85 @@
+description: "Argument validation - writeConcern"
+
+# Covers gateway writeConcern validation on a command that accepts it (insert).
+# DocumentDB flag: enable_write_concern_validation (default ON).
+
+runOn:
+  - language: "*"
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: wc_coll
+
+tests:
+  - description: "writeConcern must be a document"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            insert: "wc_coll"
+            documents: [ { _id: 1 } ]
+            writeConcern: "not-a-document"
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+
+  - description: "writeConcern w cannot be an empty string"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            insert: "wc_coll"
+            documents: [ { _id: 2 } ]
+            writeConcern: { w: "" }
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "writeConcern w cannot be an empty string"
+
+  - description: "writeConcern w of the wrong shape is rejected"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            insert: "wc_coll"
+            documents: [ { _id: 3 } ]
+            writeConcern: { w: { bad: 1 } }
+        expectError:
+          isError: true
+          errorCode: 9          # FailedToParse
+          overrides:
+            - target: "documentdb"
+              errorCode: 9
+              errorContains: "writeConcern w must be a non-negative integer"
+
+  - description: "writeConcern j must be a boolean or number"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            insert: "wc_coll"
+            documents: [ { _id: 4 } ]
+            writeConcern: { w: 1, j: "yes" }
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+              errorContains: "must be a boolean or number"

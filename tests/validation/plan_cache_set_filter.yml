@@ -1,0 +1,97 @@
+description: "Argument validation - planCacheSetFilter"
+
+# Covers gateway planCacheSetFilter argument validation (collection, indexes,
+# query, and optional sort/projection/collation shapes). Validated in a fixed
+# order in both the Rust (OSS) and managed gateways. Validation is always on.
+
+runOn:
+  - language: "*"
+
+tests:
+  - description: "indexes is a required field"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            planCacheSetFilter: "pcsf_coll"
+            query: { a: 1 }
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "required field indexes missing"
+
+  - description: "indexes must be an array"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            planCacheSetFilter: "pcsf_coll"
+            indexes: "not-an-array"
+            query: { a: 1 }
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "required field indexes must be an array"
+
+  - description: "indexes must contain at least one index"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            planCacheSetFilter: "pcsf_coll"
+            indexes: []
+            query: { a: 1 }
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "at least one index"
+
+  - description: "query is a required field"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            planCacheSetFilter: "pcsf_coll"
+            indexes: [ { a: 1 } ]
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "required field query missing"
+
+  - description: "query must be an object"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            planCacheSetFilter: "pcsf_coll"
+            indexes: [ { a: 1 } ]
+            query: "not-an-object"
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "required field query must be an object"

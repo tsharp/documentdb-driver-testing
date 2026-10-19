@@ -1,0 +1,56 @@
+description: "Argument validation - session ids (endSessions / killSessions)"
+
+# Covers gateway logical-session id validation.
+# DocumentDB flag: enable_session_argument_validation (default ON).
+
+runOn:
+  - language: "*"
+
+tests:
+  - description: "a session list entry must be a document"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            endSessions: [ "not-a-document" ]
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+              errorContains: "Session id entry must be a document"
+
+  - description: "lsid.id must be a UUID binary"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            endSessions: [ { id: "not-binary" } ]
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+              errorContains: "wrong type, expected type 'binData'"
+
+  - description: "lsid.id is required"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            endSessions: [ { } ]
+        expectError:
+          isError: true
+          errorCode: 40414      # Location40414
+          overrides:
+            - target: "documentdb"
+              errorCode: 40414
+              errorContains: "is missing but a required field"

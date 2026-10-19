@@ -1,0 +1,22 @@
+description: "Command handling - serverStatus"
+
+# Covers gateway-handled serverStatus. When supported it returns an { ok: 1 }
+# status envelope.
+#
+# NOTE: DocumentDB gates this behind enable_server_status_command (default ON).
+# With the flag OFF serverStatus returns CommandNotSupported (115).
+
+runOn:
+  - language: "*"
+
+tests:
+  - description: "serverStatus returns an ok status envelope"
+    operations:
+      - name: runCommand
+        object: database
+        database: admin
+        arguments:
+          command:
+            serverStatus: 1
+        expectResult:
+          ok: 1

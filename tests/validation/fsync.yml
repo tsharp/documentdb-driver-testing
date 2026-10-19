@@ -1,0 +1,67 @@
+description: "Command handling - fsync / fsyncUnlock"
+
+# Covers gateway-handled fsync and fsyncUnlock administrative commands:
+#   - may only run against the admin database (otherwise Unauthorized)
+#   - fsync lock field: numeric/boolean truthiness; other types -> TypeMismatch
+#   - fsyncUnlock returns the documented completion envelope
+#
+# NOTE: DocumentDB gates these behind enable_fsync_command (default OFF). With
+# the flag OFF both commands return CommandNotSupported (115). The documentdb
+# overrides below assert the strict (flag-ON) behaviour.
+
+runOn:
+  - language: "*"
+
+tests:
+  - description: "fsync may only run against the admin database"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            fsync: 1
+        expectError:
+          isError: true
+          errorCode: 13         # Unauthorized
+          overrides:
+            - target: "documentdb"
+              errorCode: 13
+
+  - description: "fsync lock must be numeric or boolean"
+    operations:
+      - name: runCommand
+        object: database
+        database: admin
+        arguments:
+          command:
+            fsync: 1
+            lock: "not-a-bool"
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+
+  - description: "fsync without lock succeeds on admin"
+    operations:
+      - name: runCommand
+        object: database
+        database: admin
+        arguments:
+          command:
+            fsync: 1
+        expectResult:
+          ok: 1
+
+  - description: "fsyncUnlock succeeds on admin even when nothing is locked"
+    operations:
+      - name: runCommand
+        object: database
+        database: admin
+        arguments:
+          command:
+            fsyncUnlock: 1
+        expectResult:
+          ok: 1

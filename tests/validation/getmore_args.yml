@@ -1,0 +1,42 @@
+description: "Argument validation - getMore"
+
+# Covers gateway getMore argument validation (batchSize / cursor type checks).
+# DocumentDB flag: enable_getmore_argument_validation (default ON).
+
+runOn:
+  - language: "*"
+
+tests:
+  - description: "getMore rejects a non-numeric batchSize"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            getMore: 1
+            collection: "gm_coll"
+            batchSize: "not-a-number"
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+
+  - description: "getMore rejects a negative batchSize"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            getMore: 1
+            collection: "gm_coll"
+            batchSize: -5
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2

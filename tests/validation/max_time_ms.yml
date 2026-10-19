@@ -1,0 +1,90 @@
+description: "Argument validation - maxTimeMS"
+
+# Covers strict maxTimeMS validation: non-numeric, non-integral, negative, or
+# out-of-[0, 2147483647] values are rejected with BadValue.
+#
+# NOTE: DocumentDB gates this behind enable_max_time_ms_validation (default OFF).
+# The documentdb overrides assert the strict (flag-ON) behaviour; enable the
+# flag on the target to exercise them.
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertOne
+    object: collection
+    database: harness_test
+    collection: mt_coll
+    arguments:
+      document: { _id: 1 }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: mt_coll
+
+tests:
+  - description: "maxTimeMS must be numeric"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "mt_coll"
+            maxTimeMS: "not-a-number"
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+
+  - description: "maxTimeMS cannot be negative"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "mt_coll"
+            maxTimeMS: -1
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+
+  - description: "maxTimeMS must be integral"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "mt_coll"
+            maxTimeMS: 1.5
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+
+  - description: "maxTimeMS cannot exceed the 32-bit maximum"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "mt_coll"
+            maxTimeMS: 2147483648
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2

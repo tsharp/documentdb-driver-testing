@@ -1,0 +1,76 @@
+description: "Argument validation - explain verbosity"
+
+# Covers strict explain argument validation:
+#   - invalid verbosity string  -> BadValue ("Invalid verbosity option for explain: <value>")
+#   - non-string verbosity      -> TypeMismatch
+#   - non-document explain target (wrapper form) -> TypeMismatch
+#
+# NOTE: DocumentDB gates this behind enable_explain_verbosity_validation
+# (default OFF). The documentdb overrides assert the strict (flag-ON) behaviour.
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertOne
+    object: collection
+    database: harness_test
+    collection: ev_coll
+    arguments:
+      document: { _id: 1 }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: ev_coll
+
+tests:
+  - description: "explain rejects an invalid verbosity string"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            explain: { find: "ev_coll" }
+            verbosity: "bogus"
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "Invalid verbosity option for explain"
+
+  - description: "explain rejects a non-string verbosity"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            explain: { find: "ev_coll" }
+            verbosity: 123
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+
+  - description: "wrapper explain requires a document target"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            explain: 123
+            verbosity: "queryPlanner"
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14

@@ -1,0 +1,87 @@
+description: "Argument validation - BSON type of command arguments"
+
+# Covers wrong-BSON-type argument validation across several commands
+# (findAndModify, getParameter, listIndexes, dropIndexes, dbStats).
+# DocumentDB flag: enable_bson_type_argument_validation (default ON).
+#
+# These assert that a wrong-typed argument is rejected. Error codes are given as
+# documentdb overrides where known; confirm exact codes against the *_errors
+# regression baselines when tightening.
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertOne
+    object: collection
+    database: harness_test
+    collection: bt_coll
+    arguments:
+      document: { _id: 1, a: 1 }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: bt_coll
+
+tests:
+  - description: "findAndModify query must be a document"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            findAndModify: "bt_coll"
+            query: "not-a-document"
+            update: { $set: { a: 2 } }
+        expectError:
+          isError: true
+          overrides:
+            - target: "documentdb"
+              errorCode: 14     # TypeMismatch
+
+  - description: "dropIndexes index argument must be a string or document"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            dropIndexes: "bt_coll"
+            index: 123
+        expectError:
+          isError: true
+          overrides:
+            - target: "documentdb"
+              errorCode: 2      # BadValue
+
+  - description: "dbStats scale must be numeric"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            dbStats: 1
+            scale: "not-a-number"
+        expectError:
+          isError: true
+          overrides:
+            - target: "documentdb"
+              errorCode: 2      # BadValue
+
+  - description: "listIndexes collection argument must be a string"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            listIndexes: { not: "a-string" }
+        expectError:
+          isError: true
+          overrides:
+            - target: "documentdb"
+              errorCode: 2      # BadValue

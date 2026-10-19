@@ -1,0 +1,104 @@
+description: "Argument validation - readConcern"
+
+# Covers gateway readConcern validation across commands that accept it.
+# DocumentDB flag: enable_read_concern_validation (default ON).
+
+runOn:
+  - language: "*"
+
+setup:
+  - name: insertOne
+    object: collection
+    database: harness_test
+    collection: rc_coll
+    arguments:
+      document: { _id: 1 }
+
+teardown:
+  - name: dropCollection
+    object: database
+    database: harness_test
+    collection: rc_coll
+
+tests:
+  - description: "readConcern must be a document"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "rc_coll"
+            readConcern: "not-a-document"
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+
+  - description: "readConcern level must be a string"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "rc_coll"
+            readConcern: { level: 123 }
+        expectError:
+          isError: true
+          errorCode: 14         # TypeMismatch
+          overrides:
+            - target: "documentdb"
+              errorCode: 14
+
+  - description: "readConcern rejects an invalid level"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "rc_coll"
+            readConcern: { level: "bogus" }
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "Invalid readConcern level"
+
+  - description: "readConcern rejects an invalid provenance"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "rc_coll"
+            readConcern: { level: "local", provenance: "bogus" }
+        expectError:
+          isError: true
+          errorCode: 2          # BadValue
+          overrides:
+            - target: "documentdb"
+              errorCode: 2
+              errorContains: "Invalid readConcern provenance"
+
+  - description: "readConcern rejects an unknown sub-field"
+    operations:
+      - name: runCommand
+        object: database
+        database: harness_test
+        arguments:
+          command:
+            find: "rc_coll"
+            readConcern: { level: "local", bogusField: 1 }
+        expectError:
+          isError: true
+          errorCode: 40415      # UnknownBsonField
+          overrides:
+            - target: "documentdb"
+              errorCode: 40415
